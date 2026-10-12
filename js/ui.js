@@ -921,7 +921,11 @@
     });
   }
 
-  const fileName = (ext) => (app.doc.name || 'raumplan').replace(/[^\wäöüÄÖÜß\- ]+/g, '').trim().replace(/\s+/g, '_') + ext;
+  const fileName = (ext) => {
+    const map = { ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' };
+    const base = (app.doc.name || 'raumplan').replace(/[äöüÄÖÜß]/g, (c) => map[c]).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_');
+    return (base || 'raumplan') + ext;
+  };
 
   function download(blob, name) {
     const a = document.createElement('a');
