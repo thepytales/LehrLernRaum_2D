@@ -1132,7 +1132,7 @@
         <ul>
           <li><strong>Möbel hinzufügen:</strong> links unter „Möbel“ antippen (oder am Computer in den Plan ziehen). Die Zahlen zeigen, wie viele davon im LLR vorhanden sind.</li>
           <li><strong>Verschieben:</strong> Objekt antippen und ziehen. <strong>Drehen:</strong> am blauen Kreis über der Auswahl ziehen (rastet in ${app.doc.settings.angleSnap}°-Schritten ein, Umschalt = frei) oder Knöpfe −15°/+15°.</li>
-          <li><strong>Tische kombinieren:</strong> Tische rasten magnetisch an die Kanten anderer Tische an. Angestellte Stühle wandern beim Verschieben und Drehen eines Tisches mit.</li>
+          <li><strong>Tische kombinieren:</strong> Tische rasten magnetisch an die Kanten anderer Tische an. Angestellte Stühle wandern beim Verschieben und Drehen eines Tisches mit. <strong>Doppelklick bzw. Doppeltipp</strong> auf einen Tisch wählt die ganze Tischgruppe samt Stühlen aus.</li>
           <li><strong>Stühle:</strong> drehen sich automatisch zum nächsten Tisch, wenn man sie an eine Tischkante zieht.</li>
           <li><strong>Ansicht:</strong> leere Fläche ziehen = verschieben, Mausrad oder zwei Finger = zoomen.</li>
           <li><strong>Mehrere Objekte:</strong> „Mehrfach“ aktivieren und antippen bzw. Rahmen aufziehen – am Computer mit gedrückter Umschalttaste.</li>

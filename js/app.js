@@ -70,6 +70,7 @@
     if (preset) {
       if (preset.shelves) doc.objects = doc.objects.filter((o) => o.type !== 'shelfRound');
       doc.objects = doc.objects.concat(app.buildPreset(preset, doc));
+      doc.name = preset.name;
     }
     return doc;
   };
@@ -791,6 +792,7 @@
         if (blocked) shelves.forEach((sh, i) => parks[i] && Object.assign(sh, { x: parks[i].x, y: parks[i].y, rot: parks[i].rot }));
       }
       doc.objects.push(...added);
+      if (!doc.name || doc.name === 'Neuer Raumplan' || LLR.PRESETS.some((x) => x.name === doc.name)) doc.name = preset.name;
     });
     app.sel = new Set();
     app.emit('select');

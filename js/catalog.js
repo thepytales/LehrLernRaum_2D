@@ -174,10 +174,6 @@
       s += rectEl(-w / 2 + 14, -d / 2 + 3, w - 28, 9, `rx="2" fill="#5F6B7A"`);
       s += line(-w / 2 + 18, -d * 0.12, -w / 2 + 18, -d / 2 + 10, `stroke="#5F6B7A" stroke-width="2"`);
       s += line(w / 2 - 18, -d * 0.12, w / 2 - 18, -d / 2 + 10, `stroke="#5F6B7A" stroke-width="2"`);
-      s += path(
-        `M-6 ${f(-d * 0.02)} a6 6 0 1 1 0.01 0 M-3 ${f(d * 0.06)} l2 10 h8 l3 6`,
-        `fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`
-      );
       return s;
     },
   };

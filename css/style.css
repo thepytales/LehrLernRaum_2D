@@ -459,6 +459,11 @@ svg use {
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .preset .page {
   font-size: 11px;
@@ -1207,6 +1212,10 @@ dialog::backdrop {
   }
   .panel-right.open {
     transform: none;
+  }
+  #props,
+  #checks {
+    scroll-margin-top: 60px;
   }
   .mobile-bar {
     display: flex !important;
