@@ -1,0 +1,12 @@
+{
+  "name": "LLR-Raumplaner 2D",
+  "short_name": "LLR-Planer",
+  "description": "2D-Raumplaner für den Lehr-Lern-Raum Inklusion (LLR)",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef0f3",
+  "theme_color": "#1F4AA8",
+  "lang": "de",
+  "icons": [{ "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
