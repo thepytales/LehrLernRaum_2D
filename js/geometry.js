@@ -60,6 +60,15 @@
     return pts;
   };
 
+  G.ellipsePoly = (rx, ry, n = 24) => {
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      pts.push({ x: Math.cos(a) * rx, y: Math.sin(a) * ry });
+    }
+    return pts;
+  };
+
   /* Ringsegment (z. B. halbrundes Regal) als Liste konvexer Vierecke */
   G.arcParts = (rOuter, rInner, a0, a1, segments) => {
     const parts = [];
