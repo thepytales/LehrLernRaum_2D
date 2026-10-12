@@ -15,6 +15,38 @@
     return d.parts(o, S).map((p) => G.toWorld(p, o));
   };
 
+  /* Dreieckstische und Rechtecktische */
+  A.isTable = (o) => {
+    const d = T[o.type];
+    return !!d && d.kind === 'table';
+  };
+
+  /* Größter Abstand eines Eckpunkts vom Objektmittelpunkt */
+  A.reach = (poly, c) => {
+    let r = 0;
+    for (const p of poly) r = Math.max(r, Math.hypot(p.x - c.x, p.y - c.y));
+    return r;
+  };
+
+  /* Trennwand: Endpunkte der Wandlinie */
+  A.partitionEnds = (o) => {
+    const w = o.w || 120;
+    return G.toWorld([{ x: -w / 2, y: 0 }, { x: w / 2, y: 0 }], o);
+  };
+
+  /* Zwei Trennwände sind verbunden, wenn ein Ende an der anderen Wand anliegt */
+  A.partitionsJoined = (a, b) => {
+    const ea = A.partitionEnds(a);
+    const eb = A.partitionEnds(b);
+    for (const [P, Q] of [[ea, eb], [eb, ea]]) {
+      for (const p of P) {
+        const q = G.closestOnSeg(p, Q[0], Q[1]);
+        if (Math.hypot(p.x - q.x, p.y - q.y) < 4) return true;
+      }
+    }
+    return false;
+  };
+
   A.isObstacle = (o, S, ignoreSeats) => {
     const d = T[o.type];
     if (!d || !d.obstacle) return false;
@@ -196,12 +228,12 @@
     };
     const tables = [];
     for (const o of doc.objects) {
-      if (o.type !== 'table') continue;
+      if (!A.isTable(o)) continue;
       const poly = A.worldParts(o, S)[0];
       const spots = [];
-      for (let e = 0; e < 3; e++) {
+      for (let e = 0; e < poly.length; e++) {
         const a = poly[e];
-        const b = poly[(e + 1) % 3];
+        const b = poly[(e + 1) % poly.length];
         const n = G.edgeNormal(poly, e);
         let found = null;
         let foundLater = null;
@@ -276,11 +308,15 @@
       const d = T[o.type];
       if (!d || !d.present || !d.surface) continue;
       const s = d.surface(o);
+      const p = G.add(G.rot(s.p, o.rot || 0), { x: o.x, y: o.y });
+      const along = G.rot({ x: (s.w || 100) / 2, y: 0 }, o.rot || 0);
       out.push({
         id: o.id,
         name: d.short,
-        p: G.add(G.rot(s.p, o.rot || 0), { x: o.x, y: o.y }),
+        p,
         n: G.rot(s.n, o.rot || 0),
+        a: G.sub(p, along),
+        b: G.add(p, along),
       });
     }
     return out;
@@ -300,38 +336,48 @@
     return false;
   };
 
+  A.isSeat = (o) => o.type === 'chair' || o.type === 'stool' || o.type === 'wheelchair';
+
+  const sightBlockers = (doc) => {
+    const out = [];
+    for (const o of doc.objects) if (TALL[o.type]) out.push(...A.worldParts(o, doc.settings));
+    return out;
+  };
+
+  const blocked = (eye, q, blockers) => blockers.some((poly) => segHitsPoly(q, eye, poly));
+
+  /* Anteil der Präsentationsfläche, der vom Platz aus nicht verdeckt ist */
+  const visibleFraction = (eye, s, blockers, n) => {
+    let vis = 0;
+    for (let i = 0; i < n; i++) if (!blocked(eye, G.lerp(s.a, s.b, (i + 0.5) / n), blockers)) vis++;
+    return vis / n;
+  };
+
+  const viewAngle = (o, s) => {
+    // Hocker sind drehbar: Blickrichtung frei
+    if (o.type === 'stool') return 0;
+    const face = G.rot({ x: 0, y: -1 }, o.rot || 0);
+    return Math.abs(G.normAngle(G.angle(G.sub(s.p, o)) - G.angle(face)));
+  };
+
+  const sightCat = (ang) => (ang <= 40 ? 'good' : ang <= 95 ? 'side' : 'back');
+
+  const better = (cand, best) => !best || cand.ang < best.ang - 1 || (Math.abs(cand.ang - best.ang) <= 1 && cand.dist < best.dist);
+
   A.sight = function (doc) {
-    const S = doc.settings;
     const surfaces = A.surfaces(doc);
-    const blockers = [];
-    for (const o of doc.objects) if (TALL[o.type]) blockers.push({ id: o.id, polys: A.worldParts(o, S) });
+    const blockers = sightBlockers(doc);
     const seats = [];
     for (const o of doc.objects) {
-      if (o.type !== 'chair' && o.type !== 'stool' && o.type !== 'wheelchair') continue;
-      const face = G.rot({ x: 0, y: -1 }, o.rot || 0);
+      if (!A.isSeat(o)) continue;
       let best = null;
       for (const s of surfaces) {
-        const v = G.sub(o, s.p);
-        if (G.dot(v, s.n) < 20) continue;
-        let hidden = false;
-        for (const bl of blockers) {
-          for (const poly of bl.polys) {
-            if (segHitsPoly(s.p, { x: o.x, y: o.y }, poly)) {
-              hidden = true;
-              break;
-            }
-          }
-          if (hidden) break;
-        }
-        if (hidden) continue;
-        const to = G.sub(s.p, o);
-        // Hocker sind drehbar: Blickrichtung frei
-        const ang = o.type === 'stool' ? 0 : Math.abs(G.normAngle(G.angle(to) - G.angle(face)));
-        const dist = G.len(to);
-        if (!best || ang < best.ang - 1 || (Math.abs(ang - best.ang) <= 1 && dist < best.dist)) best = { ang, dist, target: s };
+        if (G.dot(G.sub(o, s.p), s.n) < 20) continue;
+        if (visibleFraction(o, s, blockers, 5) < 0.5) continue;
+        const cand = { ang: viewAngle(o, s), dist: G.dist(o, s.p), target: s };
+        if (better(cand, best)) best = cand;
       }
-      let cat = 'none';
-      if (best) cat = best.ang <= 40 ? 'good' : best.ang <= 95 ? 'side' : 'back';
+      const cat = best ? sightCat(best.ang) : 'none';
       seats.push({ id: o.id, x: o.x, y: o.y, best, cat });
     }
     return {
@@ -340,6 +386,41 @@
       good: seats.filter((s) => s.cat === 'good').length,
       side: seats.filter((s) => s.cat === 'side').length,
       back: seats.filter((s) => s.cat === 'back' || s.cat === 'none').length,
+    };
+  };
+
+  /* Sichtkegel eines Sitzplatzes: je Präsentationsfläche die sichtbaren
+     und verdeckten Abschnitte, Entfernung und nötige Kopfdrehung. */
+  A.sightCone = function (doc, id) {
+    const o = doc.objects.find((x) => x.id === id);
+    if (!o || !A.isSeat(o)) return null;
+    const blockers = sightBlockers(doc);
+    const N = 24;
+    const views = [];
+    let best = null;
+    for (const s of A.surfaces(doc)) {
+      if (G.dot(G.sub(o, s.p), s.n) < 20) continue;
+      const runs = [];
+      let vis = 0;
+      for (let i = 0; i < N; i++) {
+        const v = !blocked(o, G.lerp(s.a, s.b, (i + 0.5) / N), blockers);
+        if (v) vis++;
+        const last = runs[runs.length - 1];
+        if (last && last.vis === v) last.t1 = (i + 1) / N;
+        else runs.push({ t0: i / N, t1: (i + 1) / N, vis: v });
+      }
+      const view = { s, runs, frac: vis / N, ang: viewAngle(o, s), dist: G.dist(o, s.p) };
+      view.turn = sightCat(view.ang);
+      view.cat = view.frac < 0.5 ? 'hidden' : view.turn;
+      views.push(view);
+      if (view.cat !== 'hidden' && better(view, best)) best = view;
+    }
+    return {
+      eye: { x: o.x, y: o.y },
+      face: G.rot({ x: 0, y: -1 }, o.rot || 0),
+      free: o.type === 'stool',
+      views,
+      best,
     };
   };
 
@@ -374,6 +455,7 @@
         const ka = a.d.kind;
         const kb = b.d.kind;
         if ((ka === 'seat' && kb === 'table') || (kb === 'seat' && ka === 'table')) continue;
+        if (a.o.type === 'partition' && b.o.type === 'partition' && A.partitionsJoined(a.o, b.o)) continue;
         let tol = 1.5;
         if ((ka === 'wheelchair' && kb === 'table') || (kb === 'wheelchair' && ka === 'table')) tol = 28;
         if ((ka === 'wheelchair' && kb === 'seat') || (kb === 'wheelchair' && ka === 'seat')) tol = 1.5;
@@ -402,7 +484,7 @@
     const self = doc.objects.find((o) => o.id === id);
     if (!self) return [];
     const sd = T[self.type];
-    if (!sd || sd.wall || sd.kind === 'label' || sd.kind === 'floor') return [];
+    if (!sd || sd.wall || sd.kind === 'label' || sd.kind === 'floor' || sd.kind === 'zone') return [];
     const mine = A.worldParts(self, S);
     const sectors = [null, null, null, null];
     const consider = (d, p, q, otherId) => {
@@ -445,7 +527,7 @@
   /* Objekte, die beim Verschieben eines Tisches mitgenommen werden (angestellte Stühle) */
   A.attachedSeats = function (doc, tableIds) {
     const S = doc.settings;
-    const tables = doc.objects.filter((o) => o.type === 'table');
+    const tables = doc.objects.filter(A.isTable);
     const polys = new Map(tables.map((t) => [t.id, A.worldParts(t, S)[0]]));
     const out = [];
     for (const o of doc.objects) {
@@ -454,7 +536,7 @@
       let best = null;
       for (const t of tables) {
         const tp = polys.get(t.id);
-        if (Math.abs(t.x - o.x) > 200 || Math.abs(t.y - o.y) > 200) continue;
+        if (Math.hypot(t.x - o.x, t.y - o.y) > A.reach(tp, t) + 80) continue;
         let d = Infinity;
         for (const p of cp) d = Math.min(d, G.polyDistance(p, tp).d);
         if (!best || d < best.d) best = { d, id: t.id };

@@ -11,22 +11,31 @@ Tablet und Smartphone.
 
 ## Funktionen
 
-- **Raum** in Draufsicht: 6,30 m × 8,00 m (≈ 50 m², Tafel an der kürzeren Seite),
-  Maße unter *Raum & Einstellungen* anpassbar. Grundausstattung nach der Room-Tour:
+- **Raum** in Draufsicht: 6,30 m × 8,00 m (≈ 50 m², Tafel an der kürzeren Seite).
+  Die Raumgröße lässt sich direkt im Plan ändern (an einer Wand oder an den blauen
+  Griffen ziehen, Möbel an der Wand wandern mit) oder als Maß eintippen. Grundausstattung nach der Room-Tour:
   interaktive Tafel mit Tafelflügeln, Lehrertisch mit PC, Tür, Fenster mit Heizkörpern,
   Schränke mit Wandbildschirm, Ablageturm, Sofa-Ecke mit Teppich und Sitzsäcken,
   halbrunde Bücherregale, mobile Trennwand, Regale, Tablet-Wand.
 - **Möbelkatalog** mit Bestandszählern laut Handreichung (12 Dreieckstische,
   19 Stühle, 2 Hocker, Sofa-Elemente …) – Überschreitungen werden markiert.
+  Zusätzlich Rechtecktische und eckige Teppiche in frei wählbarer Größe.
+- **Zonen** (eckig oder rund, farbig, mit Namen und Flächenangabe), z. B. Ruhezone,
+  Präsentation oder Gruppenarbeit. Die Fläche einer Zone bleibt frei bedienbar,
+  angefasst wird sie am Rand oder am Namensschild.
 - **Alle 13 Anordnungen der Handreichung** als Vorlagen (Seminarsitzordnung I–III,
   Gesprächskreis, Stern, schmale/kompakte Tafel, U-Form, Oval, Hexagon & Dreieck,
   großer Gruppentisch, Zweiertische, Einzelarbeitsplätze), danach frei anpassbar.
-- **Freies Einrichten**: Ziehen, Drehen (15°-Raster, Umschalt = frei), Duplizieren,
-  Sperren, Mehrfachauswahl, Beschriftungen (z. B. Namen für einen Sitzplan),
+- **Freies Einrichten**: Ziehen, Drehen (15°-Raster, Umschalt = frei), Größe ändern
+  an Griffen (Kanten und Ecken), Duplizieren, Sperren, Mehrfachauswahl (Tippen ins
+  Leere hebt sie auf), Beschriftungen (z. B. Namen für einen Sitzplan),
   freie Objekte und Textnotizen.
-- **Magnetisches Einrasten**: Dreieckstische rasten Kante an Kante an,
+- **Magnetisches Einrasten**: Dreiecks- und Rechtecktische rasten Kante an Kante an,
   angestellte Stühle wandern mit dem Tisch mit, Stühle drehen sich zum Tisch.
-  Doppelklick/Doppeltipp auf einen Tisch wählt die ganze Tischgruppe.
+  Mobile Trennwände rasten an den Enden aneinander ein (gerade, 45°/90° oder als T).
+  Doppelklick/Doppeltipp auf einen Tisch bzw. eine Trennwand wählt die ganze Gruppe.
+  Über das Magnet-Symbol lassen sich Einrasten, Mitnehmen der Stühle und Einrasten
+  am Raster (Rastergröße 10–100 cm) schnell an- und ausschalten.
 - **Rollstuhl-Check** (vereinfacht nach DIN 18040-1): befahrbare Flächen ab der Tür
   (Durchgang ≥ 90 cm), Flächen zum Wenden (Ø 150 cm), zu enge Bereiche,
   Rollstuhlplätze an Tischkanten. Zusätzlich ein Rollstuhl als Prüfobjekt
@@ -35,6 +44,8 @@ Tablet und Smartphone.
   (grün ≥ 90 cm) und ein Messwerkzeug, das an Kanten einrastet.
 - **Sicht-Check**: zeigt je Sitzplatz, ob Tafel, Wandbildschirm oder Beamer-Fläche
   direkt, seitlich oder gar nicht im Blick sind (Regale/Trennwände verdecken).
+  Ein angetippter Sitzplatz zeigt seinen **Sichtkegel**: Blickfeld, sichtbare und
+  verdeckte Teile jeder Präsentationsfläche, Entfernung und nötige Kopfdrehung.
 - **Speichern & Teilen**: automatische Sicherung im Browser, mehrere Pläne,
   Export/Import als `.json`, Teilen-Link (der Plan steckt komplett im Link),
   PNG-Export und Druckansicht (A4, auch als PDF).

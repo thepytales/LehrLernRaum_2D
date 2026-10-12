@@ -16,6 +16,8 @@
     snap: true,
     angleSnap: 15,
     carryChairs: true,
+    grid: 50,
+    gridSnap: false,
   };
 
   LLR.DEFAULT_ROOM = { w: 630, l: 800 };

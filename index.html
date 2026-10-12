@@ -53,6 +53,8 @@
         <symbol id="i-alert" viewBox="0 0 24 24"><path d="m10.3 3.9-8.2 14.2A2 2 0 0 0 3.8 21h16.4a2 2 0 0 0 1.7-2.9L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4M12 17h.01" /></symbol>
         <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></symbol>
         <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></symbol>
+        <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M5 3v8a7 7 0 0 0 14 0V3h-4v8a3 3 0 0 1-6 0V3z" /><path d="M5 7h4M15 7h4" /></symbol>
+        <symbol id="i-carry" viewBox="0 0 24 24"><rect x="2" y="3" width="13" height="8" rx="1.5" /><rect x="5" y="14" width="7" height="7" rx="1.5" /><path d="M16 15h6M19.5 12.5 22 15l-2.5 2.5" /></symbol>
         <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></symbol>
       </defs>
     </svg>
@@ -127,7 +129,22 @@
             <button class="tool" data-overlay="sight" aria-pressed="false" title="Sicht auf Präsentationsflächen ein/aus"><svg><use href="#i-eye" /></svg><span>Sicht</span></button>
             <button class="tool" data-overlay="dims" aria-pressed="true" title="Maße & Abstände ein/aus"><svg><use href="#i-dims" /></svg><span>Abstände</span></button>
             <button class="tool" data-overlay="grid" aria-pressed="true" title="Raster ein/aus"><svg><use href="#i-grid" /></svg><span>Raster</span></button>
+            <button class="tool" id="tool-snap" aria-haspopup="dialog" aria-expanded="false" aria-controls="snap-pop" title="Einrasten, Stühle mitnehmen, Raster"><svg><use href="#i-magnet" /></svg><span>Einrasten</span></button>
           </div>
+        </div>
+
+        <div class="popover" id="snap-pop" role="dialog" aria-label="Einrasten und Raster" hidden>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-magnet" /></svg><span class="lbl">Magnetisch einrasten<small>Tischkanten, Trennwände, Wände, Stuhl zum Tisch</small></span><input type="checkbox" class="switch" data-pref="snap" aria-label="Magnetisch einrasten" /></label>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-carry" /></svg><span class="lbl">Stühle wandern mit<small>Angestellte Stühle folgen dem Tisch</small></span><input type="checkbox" class="switch" data-pref="carryChairs" aria-label="Stühle wandern mit" /></label>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-grid" /></svg><span class="lbl">Am Raster einrasten<small>Möbel springen auf die Rasterlinien</small></span><input type="checkbox" class="switch" data-pref="gridSnap" aria-label="Am Raster einrasten" /></label>
+          <div class="pop-row">
+            <span>Rastergröße</span>
+            <div class="seg" role="group" aria-label="Rastergröße in cm">
+              <button type="button" data-grid="10">10</button><button type="button" data-grid="25">25</button><button type="button" data-grid="50">50</button><button type="button" data-grid="100">100</button>
+            </div>
+            <span class="unit">cm</span>
+          </div>
+          <p class="pop-note">Alt-Taste beim Ziehen: kurz ohne Einrasten</p>
         </div>
 
         <svg id="plan" role="application" aria-label="Raumplan in Draufsicht. Objekte mit Maus oder Finger verschieben; Tastatur: Pfeiltasten verschieben, R dreht, Entf löscht." tabindex="0"></svg>
@@ -145,6 +162,7 @@
           <button class="icon-btn" data-act="rotl" aria-label="Gegen den Uhrzeigersinn drehen" title="Drehen −15°"><svg><use href="#i-rot-ccw" /></svg></button>
           <button class="icon-btn" data-act="rotr" aria-label="Im Uhrzeigersinn drehen" title="Drehen +15°"><svg><use href="#i-rot-cw" /></svg></button>
           <button class="icon-btn" data-act="dup" aria-label="Duplizieren" title="Duplizieren (Strg+D)"><svg><use href="#i-copy" /></svg></button>
+          <button class="icon-btn toggle-btn" data-act="carry" aria-pressed="true" aria-label="Angestellte Stühle mitnehmen" title="Stühle wandern mit dem Tisch mit (an/aus)" hidden><svg><use href="#i-carry" /></svg></button>
           <button class="icon-btn" data-act="lock" aria-label="Sperren/Entsperren" title="Sperren/Entsperren (L)"><svg><use href="#i-lock" /></svg></button>
           <button class="icon-btn danger" data-act="del" aria-label="Löschen" title="Löschen (Entf)"><svg><use href="#i-trash" /></svg></button>
           <button class="icon-btn only-mobile" data-act="details" aria-label="Details anzeigen" title="Details"><svg><use href="#i-panel" /></svg></button>

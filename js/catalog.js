@@ -37,6 +37,22 @@
     rot: { fill: '#F1AEB5', label: 'Rot' },
     holz: { fill: COLORS.wood, label: 'Holz' },
   };
+  const RUG_COLORS = {
+    beige: { fill: '#C9A27E', line: '#8C6A4F', label: 'Beige' },
+    grau: { fill: '#ADB5BD', line: '#6C757D', label: 'Grau' },
+    blau: { fill: '#8DB4E2', line: '#3B6EA8', label: 'Blau' },
+    gruen: { fill: '#9CCB9F', line: '#4F8A5B', label: 'Grün' },
+    rot: { fill: '#E3A1A1', line: '#A94442', label: 'Rot' },
+  };
+  const ZONE_COLORS = {
+    blau: { fill: '#4DABF7', ink: '#1864AB', label: 'Blau' },
+    gruen: { fill: '#69DB7C', ink: '#2B8A3E', label: 'Grün' },
+    gelb: { fill: '#FFD43B', ink: '#8F5F00', label: 'Gelb' },
+    orange: { fill: '#FFA94D', ink: '#C2410C', label: 'Orange' },
+    rot: { fill: '#FF8787', ink: '#C92A2A', label: 'Rot' },
+    lila: { fill: '#B197FC', ink: '#5F3DC4', label: 'Lila' },
+    grau: { fill: '#ADB5BD', ink: '#495057', label: 'Grau' },
+  };
 
   /* ---------- Dreieckstisch ---------- */
   function tablePoly(S) {
@@ -81,6 +97,27 @@
       return (
         path(G.roundedPath(ins, 6), `fill="${COLORS.wood}" stroke="${COLORS.woodDark}" stroke-width="1.2"`) + legs
       );
+    },
+  };
+
+  T.tableRect = {
+    name: 'Rechtecktisch',
+    short: 'Rechtecktisch',
+    cat: 'tische',
+    layer: 2,
+    obstacle: true,
+    kind: 'table',
+    resizable: true,
+    defaultSize: { w: 120, d: 60 },
+    minSize: { w: 40, d: 30 },
+    desc: 'Rechteckiger Tisch (Standard 120 × 60 cm, Größe frei einstellbar). Rastet wie die Dreieckstische Kante an Kante ein.',
+    parts: (o) => [G.rect(o.w || 120, o.d || 60)],
+    draw(o) {
+      const w = o.w || 120;
+      const d = o.d || 60;
+      let s = rectEl(-w / 2 + 0.7, -d / 2 + 0.7, w - 1.4, d - 1.4, `rx="4" fill="${COLORS.wood}" stroke="${COLORS.woodDark}" stroke-width="1.2"`);
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) s += circ(sx * (w / 2 - 8), sy * (d / 2 - 8), 2.2, `fill="${COLORS.frame}" opacity="0.55"`);
+      return s;
     },
   };
 
@@ -274,15 +311,54 @@
     round: true,
     defaultSize: { w: 160, d: 160 },
     minSize: { w: 60, d: 60 },
+    colors: RUG_COLORS,
+    defaultColor: 'beige',
     desc: 'Runder Teppich (kein Hindernis für die Rollstuhl-Analyse).',
     parts: (o) => [G.circlePoly((o.w || 160) / 2, 24)],
     draw(o) {
       const r = (o.w || 160) / 2;
+      const c = RUG_COLORS[o.color] || RUG_COLORS.beige;
       return (
-        circ(0, 0, r, `fill="#C9A27E" fill-opacity="0.55" stroke="#8C6A4F" stroke-width="1"`) +
-        circ(0, 0, r * 0.82, `fill="none" stroke="#8C6A4F" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"`) +
-        circ(0, 0, r * 0.55, `fill="none" stroke="#8C6A4F" stroke-width="1" stroke-dasharray="2 4" opacity="0.6"`)
+        circ(0, 0, r, `fill="${c.fill}" fill-opacity="0.55" stroke="${c.line}" stroke-width="1"`) +
+        circ(0, 0, r * 0.82, `fill="none" stroke="${c.line}" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"`) +
+        circ(0, 0, r * 0.55, `fill="none" stroke="${c.line}" stroke-width="1" stroke-dasharray="2 4" opacity="0.6"`)
       );
+    },
+  };
+
+  T.rugRect = {
+    name: 'Teppich (eckig)',
+    short: 'Teppich',
+    cat: 'lounge',
+    layer: 0,
+    obstacle: false,
+    kind: 'floor',
+    resizable: true,
+    defaultSize: { w: 200, d: 140 },
+    minSize: { w: 40, d: 40 },
+    colors: RUG_COLORS,
+    defaultColor: 'beige',
+    desc: 'Rechteckiger Teppich, Größe frei einstellbar (kein Hindernis für die Rollstuhl-Analyse).',
+    parts: (o) => [G.rect(o.w || 200, o.d || 140)],
+    draw(o) {
+      const w = o.w || 200;
+      const d = o.d || 140;
+      const c = RUG_COLORS[o.color] || RUG_COLORS.beige;
+      const m = Math.min(w, d) * 0.1;
+      let s = rectEl(-w / 2, -d / 2, w, d, `rx="3" fill="${c.fill}" fill-opacity="0.55" stroke="${c.line}" stroke-width="1"`);
+      s += rectEl(-w / 2 + m, -d / 2 + m, w - 2 * m, d - 2 * m, `rx="2" fill="none" stroke="${c.line}" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"`);
+      // Fransen an den kurzen Seiten
+      const alongX = w < d;
+      const len = alongX ? w : d;
+      const edge = (alongX ? d : w) / 2;
+      for (let t = -len / 2 + 4; t <= len / 2 - 4; t += 6) {
+        for (const sg of [-1, 1]) {
+          s += alongX
+            ? line(t, sg * (edge - 1), t, sg * (edge - 5), `stroke="${c.line}" stroke-width="0.8" opacity="0.6"`)
+            : line(sg * (edge - 1), t, sg * (edge - 5), t, `stroke="${c.line}" stroke-width="0.8" opacity="0.6"`);
+        }
+      }
+      return s;
     },
   };
 
@@ -329,8 +405,9 @@
     resizable: true,
     defaultSize: { w: 120, d: 40 },
     minSize: { w: 60, d: 30 },
+    handles: 'w',
     hitPad: true,
-    desc: 'Blaue mobile Stellwand mit Standfüßen (ca. 120 cm breit).',
+    desc: 'Blaue mobile Stellwand mit Standfüßen (ca. 120 cm breit). Mehrere Trennwände rasten an den Enden aneinander ein.',
     parts(o) {
       const w = o.w || 120;
       const d = o.d || 40;
@@ -560,7 +637,7 @@
     desc: 'Wandbildschirm als zusätzliche Präsentationsfläche (spiegelt die IAT).',
     parts: (o) => [G.rect(o.w || 120, 8, 0, -4)],
     bounds: (o) => G.rect(o.w || 120, 14, 0, -6),
-    surface: () => ({ p: { x: 0, y: -6 }, n: { x: 0, y: -1 } }),
+    surface: (o) => ({ p: { x: 0, y: -6 }, n: { x: 0, y: -1 }, w: o.w || 120 }),
     draw(o) {
       const w = o.w || 120;
       return rectEl(-w / 2, -8, w, 8, `rx="1.5" fill="#1B1D20"`) + rectEl(-w / 2 + 3, -6.5, w - 6, 3, `fill="#5AA9E6"`);
@@ -583,7 +660,7 @@
     desc: 'Fläche, auf die der Beamer projiziert (Präsentationsfläche).',
     parts: (o) => [G.rect(o.w || 200, 6, 0, -3)],
     bounds: (o) => G.rect(o.w || 200, 14, 0, -6),
-    surface: () => ({ p: { x: 0, y: -4 }, n: { x: 0, y: -1 } }),
+    surface: (o) => ({ p: { x: 0, y: -4 }, n: { x: 0, y: -1 }, w: o.w || 200 }),
     draw(o) {
       const w = o.w || 200;
       return rectEl(-w / 2, -6, w, 6, `fill="#FFFFFF" stroke="#5C7CFA" stroke-width="1" stroke-dasharray="4 2"`) + line(-w / 2 + 4, -3, w / 2 - 4, -3, `stroke="#BAC8FF" stroke-width="1.5"`);
@@ -736,6 +813,84 @@
     },
   };
 
+  /* ---------- Zonen ----------
+     Die Fläche lässt Klicks durch (Ansicht verschieben, Möbel darin greifen),
+     angefasst wird eine Zone am Rand oder am Namensschild. Das Namensschild
+     (tag) liegt in einer eigenen Ebene über den Möbeln. */
+  const zoneArea = (o) => {
+    const a = (o.w || 0) * (o.d || 0) * (T[o.type].ellipse ? Math.PI / 4 : 1);
+    return (a / 10000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' m²';
+  };
+
+  function zoneMarkup(o, shape) {
+    const c = ZONE_COLORS[o.color] || ZONE_COLORS.blau;
+    let s = shape(`fill="${c.fill}" fill-opacity="0.15" stroke="none" pointer-events="none"`);
+    s += shape(`fill="none" stroke="${c.ink}" stroke-width="2" stroke-dasharray="9 5" stroke-opacity="0.75" pointer-events="none"`);
+    return s + shape(`fill="none" stroke="transparent" stroke-width="16" pointer-events="stroke"`);
+  }
+
+  function zoneTag(o, w, d, round) {
+    const c = ZONE_COLORS[o.color] || ZONE_COLORS.blau;
+    const name = String(o.label || 'Zone');
+    const area = zoneArea(o);
+    const fs = Math.max(11, Math.min(18, Math.min(w, d) * 0.11));
+    const tw = name.length * fs * 0.6 + area.length * fs * 0.42 + fs * 1.6;
+    const th = fs * 1.7;
+    const x = round ? -tw / 2 : -w / 2 + 8;
+    const y = round ? -d / 2 + d * 0.12 : -d / 2 + 8;
+    let s = `<g class="zone-tag" pointer-events="all">`;
+    s += rectEl(x, y, tw, th, `rx="${f(th / 2)}" fill="#ffffff" fill-opacity="0.9" stroke="${c.ink}" stroke-width="1"`);
+    s += `<text x="${f(x + fs * 0.6)}" y="${f(y + th / 2)}" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="${f(fs)}" fill="${c.ink}"><tspan font-weight="700">${LLR.esc(name)}</tspan><tspan font-size="${f(fs * 0.75)}" dx="${f(fs * 0.4)}" fill-opacity="0.85">${area}</tspan></text>`;
+    return s + `</g>`;
+  }
+
+  T.zone = {
+    name: 'Zone (eckig)',
+    short: 'Zone',
+    cat: 'zonen',
+    layer: -1,
+    obstacle: false,
+    kind: 'zone',
+    resizable: true,
+    defaultSize: { w: 240, d: 180 },
+    minSize: { w: 40, d: 40 },
+    colors: ZONE_COLORS,
+    defaultColor: 'blau',
+    desc: 'Bereich im Raum markieren, z. B. Ruhezone, Präsentation oder Gruppenarbeit. Anfassen am Rand oder am Namensschild.',
+    parts: (o) => [G.rect(o.w || 240, o.d || 180)],
+    draw(o) {
+      const w = o.w || 240;
+      const d = o.d || 180;
+      return zoneMarkup(o, (attrs) => rectEl(-w / 2, -d / 2, w, d, `rx="8" ${attrs}`));
+    },
+    tag: (o) => zoneTag(o, o.w || 240, o.d || 180, false),
+  };
+
+  T.zoneRound = {
+    name: 'Zone (rund)',
+    short: 'Zone',
+    cat: 'zonen',
+    layer: -1,
+    obstacle: false,
+    kind: 'zone',
+    resizable: true,
+    ellipse: true,
+    defaultSize: { w: 220, d: 180 },
+    minSize: { w: 40, d: 40 },
+    colors: ZONE_COLORS,
+    defaultColor: 'gruen',
+    desc: 'Runder bzw. ovaler Bereich, z. B. für einen Gesprächskreis oder die Lounge.',
+    parts: (o) => [G.ellipsePoly((o.w || 220) / 2, (o.d || 180) / 2, 28)],
+    draw(o) {
+      const w = o.w || 220;
+      const d = o.d || 180;
+      return zoneMarkup(o, (attrs) => `<ellipse cx="0" cy="0" rx="${f(w / 2)}" ry="${f(d / 2)}" ${attrs}/>`);
+    },
+    tag: (o) => zoneTag(o, o.w || 220, o.d || 180, true),
+  };
+
+  LLR.zoneArea = zoneArea;
+
   LLR.esc = (s) =>
     String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -745,6 +900,7 @@
     { id: 'lounge', name: 'Lounge' },
     { id: 'stauraum', name: 'Möbel & Stauraum' },
     { id: 'raum', name: 'Raum & Technik' },
+    { id: 'zonen', name: 'Zonen' },
     { id: 'frei', name: 'Freie Objekte' },
   ];
 

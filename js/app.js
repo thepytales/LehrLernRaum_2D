@@ -7,6 +7,11 @@
   const NS = 'http://www.w3.org/2000/svg';
   const KEY_AUTO = 'llr2d.autosave.v1';
   const WALL = 20;
+  /* Bedien-Einstellungen: gelten sofort und gehören nicht zum Rückgängig-Verlauf */
+  const PREF_KEYS = ['snap', 'carryChairs', 'angleSnap', 'grid', 'gridSnap'];
+  const GRID_MAJOR = { 10: 50, 20: 100, 25: 100, 50: 100, 100: 500 };
+  const HATCH = '<pattern id="hatch-wall" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#5B6168"/><line x1="0" y1="0" x2="0" y2="8" stroke="#6E747B" stroke-width="3"/></pattern>';
+  const SIGHT_COLORS = { good: '#2F9E44', side: '#F59F00', back: '#E03131', none: '#E03131', hidden: '#E03131' };
 
   const app = {
     doc: null,
@@ -34,6 +39,7 @@
   const def = (o) => T[o.type];
   const S = () => app.doc.settings;
   const byId = (id) => app.doc.objects.find((o) => o.id === id);
+  const isTable = A.isTable;
 
   app.on = (ev, fn) => (app.listeners[ev] = app.listeners[ev] || []).push(fn);
   app.emit = (ev, data) => (app.listeners[ev] || []).forEach((fn) => fn(data));
@@ -81,6 +87,8 @@
     room.w = clamp(Number(room.w) || LLR.DEFAULT_ROOM.w, 200, 3000);
     room.l = clamp(Number(room.l) || LLR.DEFAULT_ROOM.l, 200, 3000);
     const settings = Object.assign({}, LLR.DEFAULT_SETTINGS, raw.settings || {});
+    settings.grid = clamp(Math.round(Number(settings.grid)) || LLR.DEFAULT_SETTINGS.grid, 5, 500);
+    settings.gridSnap = !!settings.gridSnap;
     const objects = [];
     for (const o of raw.objects) {
       if (!o || !T[o.type]) continue;
@@ -134,10 +142,15 @@
     app.changed(opts);
   };
 
+  const keepPrefs = (next) => {
+    for (const k of PREF_KEYS) if (k in app.doc.settings) next.settings[k] = app.doc.settings[k];
+    return next;
+  };
+
   app.undo = function () {
     if (!app.undoStack.length) return;
     app.redoStack.push(app.serialize());
-    app.doc = JSON.parse(app.undoStack.pop());
+    app.doc = keepPrefs(JSON.parse(app.undoStack.pop()));
     app.sel = new Set([...app.sel].filter((id) => byId(id)));
     app.renderRoom();
     app.changed({ skipHistory: true });
@@ -148,12 +161,21 @@
   app.redo = function () {
     if (!app.redoStack.length) return;
     app.undoStack.push(app.serialize());
-    app.doc = JSON.parse(app.redoStack.pop());
+    app.doc = keepPrefs(JSON.parse(app.redoStack.pop()));
     app.sel = new Set([...app.sel].filter((id) => byId(id)));
     app.renderRoom();
     app.changed({ skipHistory: true });
     app.emit('select');
     app.emit('history');
+  };
+
+  /* Bedien-Einstellung umschalten (Einrasten, Stühle mitnehmen, Raster) */
+  app.setPref = function (key, val) {
+    app.doc.settings[key] = val;
+    if (key === 'grid') app.renderRoom();
+    app.autosave();
+    app.renderOverlay();
+    app.emit('prefs');
   };
 
   let saveTimer = null;
@@ -202,15 +224,13 @@
   app.mount = function (svg) {
     app.svg = svg;
     svg.innerHTML = '';
-    const defs = el('defs', {}, svg);
-    defs.innerHTML =
-      '<pattern id="grid-s" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#D9D4C8" stroke-width="0.6"/></pattern>' +
-      '<pattern id="grid-l" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#grid-s)"/><path d="M100 0H0V100" fill="none" stroke="#C9C2B3" stroke-width="1"/></pattern>' +
-      '<pattern id="hatch-wall" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#5B6168"/><line x1="0" y1="0" x2="0" y2="8" stroke="#6E747B" stroke-width="3"/></pattern>';
+    app.els.defs = el('defs', {}, svg);
+    app.els.defs.innerHTML = HATCH;
     app.els.floor = el('g', { id: 'layer-floor' }, svg);
     app.els.analysis = el('g', { id: 'layer-analysis' }, svg);
     app.els.walls = el('g', { id: 'layer-walls' }, svg);
     app.els.objects = el('g', { id: 'layer-objects' }, svg);
+    app.els.tags = el('g', { id: 'layer-tags' }, svg);
     app.els.marks = el('g', { id: 'layer-marks', 'pointer-events': 'none' }, svg);
     app.els.overlay = el('g', { id: 'layer-overlay' }, svg);
     app.nodes = new Map();
@@ -221,11 +241,24 @@
   app.renderRoom = function () {
     const W = app.doc.room.w;
     const L = app.doc.room.l;
+    const g = S().grid || 50;
+    const M = GRID_MAJOR[g] || g * 4;
+    app.els.defs.innerHTML =
+      `<pattern id="grid-s" width="${g}" height="${g}" patternUnits="userSpaceOnUse"><path d="M${g} 0H0V${g}" fill="none" stroke="#D9D4C8" stroke-width="${g < 25 ? 0.45 : 0.6}"/></pattern>` +
+      `<pattern id="grid-l" width="${M}" height="${M}" patternUnits="userSpaceOnUse"><rect width="${M}" height="${M}" fill="url(#grid-s)"/><path d="M${M} 0H0V${M}" fill="none" stroke="#C9C2B3" stroke-width="1"/></pattern>` +
+      HATCH;
     const fl = app.els.floor;
     fl.innerHTML =
       `<rect x="0" y="0" width="${W}" height="${L}" fill="#FBF8F2"/>` +
       (app.overlay.grid ? `<rect x="0" y="0" width="${W}" height="${L}" fill="url(#grid-l)"/>` : '');
     let w = `<path fill-rule="evenodd" fill="url(#hatch-wall)" stroke="#3F444A" stroke-width="1" d="M${-WALL} ${-WALL}H${W + WALL}V${L + WALL}H${-WALL}Z M0 0V${L}H${W}V0Z"/>`;
+    // Wände ziehen = Raumgröße ändern (unsichtbare Griffflächen)
+    const band = (x, y, bw, bh, hx, hy) => {
+      const cur = hx && hy ? (hx === hy ? 'nwse-resize' : 'nesw-resize') : hx ? 'ew-resize' : 'ns-resize';
+      return `<rect data-handle="room" data-hx="${hx}" data-hy="${hy}" x="${x}" y="${y}" width="${bw}" height="${bh}" fill="transparent" style="cursor:${cur}"/>`;
+    };
+    w += band(0, -WALL, W, WALL, 0, -1) + band(0, L, W, WALL, 0, 1) + band(-WALL, 0, WALL, L, -1, 0) + band(W, 0, WALL, L, 1, 0);
+    w += band(-WALL, -WALL, WALL, WALL, -1, -1) + band(W, -WALL, WALL, WALL, 1, -1) + band(-WALL, L, WALL, WALL, -1, 1) + band(W, L, WALL, WALL, 1, 1);
     if (app.overlay.dims) {
       const ty = -WALL - 22;
       const lx = -WALL - 22;
@@ -236,7 +269,7 @@
       w += `<line x1="${lx}" y1="0" x2="${lx}" y2="${L}" stroke="#868E96" stroke-width="1"/>`;
       w += `<line x1="${lx - 6}" y1="0" x2="${lx + 6}" y2="0" stroke="#868E96"/><line x1="${lx - 6}" y1="${L}" x2="${lx + 6}" y2="${L}" stroke="#868E96"/>`;
       w += `<text transform="translate(${lx - 7} ${L / 2}) rotate(-90)" paint-order="stroke" stroke="#F1F3F5" stroke-width="5">Raumlänge ${fmtM(L)}</text>`;
-      w += `<text x="${W / 2}" y="${L + WALL + 26}" font-size="14" fill="#868E96">${fmtArea(W * L)} · Raster 50 cm</text>`;
+      w += `<text x="${W / 2}" y="${L + WALL + 26}" font-size="14" fill="#868E96">${fmtArea(W * L)} · Raster ${g} cm</text>`;
       w += `</g>`;
     }
     app.els.walls.innerHTML = w;
@@ -264,16 +297,26 @@
       const b = G.bbox(app.localBounds(o));
       html += `<rect x="${f(b.minX - 4)}" y="${f(b.minY - 4)}" width="${f(b.w + 8)}" height="${f(b.h + 8)}" fill="transparent"/>`;
     }
-    if (o.label && d.kind !== 'label') {
+    if (o.label && d.kind !== 'label' && d.kind !== 'zone') {
       const fs = d.kind === 'seat' ? 10 : 13;
       html += `<g class="lbl"><text x="0" y="0" font-size="${fs}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-weight="700" fill="#111" paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round">${LLR.esc(o.label)}</text></g>`;
     }
     n.g.innerHTML = html;
     n.lbl = n.g.querySelector('.lbl');
+    // Namensschild (Zonen) in eigener Ebene über den Möbeln
+    if (d.tag) {
+      if (!n.tag) n.tag = el('g', { 'data-id': o.id, class: 'obj' }, app.els.tags);
+      n.tag.innerHTML = d.tag(o, S());
+    } else if (n.tag) {
+      n.tag.remove();
+      n.tag = null;
+    }
   }
 
   function setTransform(n, o) {
-    n.g.setAttribute('transform', `translate(${f(o.x)} ${f(o.y)}) rotate(${f(o.rot || 0)})`);
+    const tf = `translate(${f(o.x)} ${f(o.y)}) rotate(${f(o.rot || 0)})`;
+    n.g.setAttribute('transform', tf);
+    if (n.tag) n.tag.setAttribute('transform', tf);
     if (n.lbl) n.lbl.setAttribute('transform', `rotate(${f(-(o.rot || 0))})`);
   }
 
@@ -298,6 +341,7 @@
         n.key = key;
       }
       n.g.classList.toggle('locked', !!o.locked);
+      if (n.tag) n.tag.classList.toggle('locked', !!o.locked);
       n.g.setAttribute('aria-label', def(o).name + (o.label ? ': ' + o.label : ''));
       setTransform(n, o);
       if (layer.children[idx] !== n.g) layer.insertBefore(n.g, layer.children[idx] || null);
@@ -306,6 +350,7 @@
     for (const [id, n] of app.nodes) {
       if (!seen.has(id)) {
         n.g.remove();
+        if (n.tag) n.tag.remove();
         app.nodes.delete(id);
       }
     }
@@ -367,13 +412,15 @@
     if (app.overlay.sight) {
       const sight = A.sight(app.doc);
       app.sightResult = sight;
-      const col = { good: '#2F9E44', side: '#F59F00', back: '#E03131', none: '#E03131' };
+      const col = SIGHT_COLORS;
+      // Sichtkegel nur für ausgewählte Sitzplätze, sonst wird es unübersichtlich
+      const coneIds = [...app.sel].filter((id) => {
+        const o = byId(id);
+        return o && A.isSeat(o);
+      });
+      if (coneIds.length <= 8) for (const id of coneIds) h += coneMarkup(A.sightCone(app.doc, id), k);
       for (const s of sight.seats) {
         const c = col[s.cat];
-        if (s.best && (app.sel.has(s.id) || app.sel.size === 0)) {
-          const t = s.best.target.p;
-          if (app.sel.has(s.id)) h += `<line x1="${f(s.x)}" y1="${f(s.y)}" x2="${f(t.x)}" y2="${f(t.y)}" stroke="${c}" stroke-width="${f(1.5 * k)}" stroke-dasharray="${f(6 * k)} ${f(4 * k)}"/>`;
-        }
         h += `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="7" fill="${c}" stroke="#fff" stroke-width="1.6"/>`;
         if (s.cat === 'good') h += `<path d="M${f(s.x - 3.2)} ${f(s.y)} l2.2 2.4 l4.2 -4.6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
         else if (s.cat === 'side') h += `<path d="M${f(s.x - 3)} ${f(s.y)} h6 m-2.4 -2.6 l2.4 2.6 l-2.4 2.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -384,6 +431,101 @@
     }
     app.els.marks.innerHTML = h;
   };
+
+  /* Sichtkegel eines Sitzplatzes: Blickfeld (±40°) und je Präsentationsfläche
+     ein Dreieck vom Platz zur Fläche – sichtbare Teile farbig, verdeckte rot gestrichelt */
+  function coneMarkup(cone, k) {
+    if (!cone) return '';
+    const e = cone.eye;
+    const pt = (p) => `${f(p.x)} ${f(p.y)}`;
+    let h = '';
+    if (!cone.free) {
+      const R = 110;
+      const a0 = G.add(e, G.rot(G.mul(cone.face, R), -40));
+      const a1 = G.add(e, G.rot(G.mul(cone.face, R), 40));
+      h += `<path d="M${pt(e)} L${pt(a0)} A${R} ${R} 0 0 1 ${pt(a1)} Z" fill="#4DABF7" fill-opacity="0.16" stroke="#1C7ED6" stroke-width="${f(k)}" stroke-dasharray="${f(4 * k)} ${f(3 * k)}"/>`;
+    }
+    const views = cone.views.slice().sort((x, y) => (x === cone.best) - (y === cone.best));
+    for (const v of views) {
+      const strong = v === cone.best;
+      const c = SIGHT_COLORS[v.turn];
+      const op = strong ? 0.3 : 0.12;
+      for (const r of v.runs) {
+        const p0 = G.lerp(v.s.a, v.s.b, r.t0);
+        const p1 = G.lerp(v.s.a, v.s.b, r.t1);
+        if (r.vis) h += `<path d="M${pt(e)} L${pt(p0)} L${pt(p1)} Z" fill="${c}" fill-opacity="${op}"/>`;
+        else h += `<path d="M${pt(e)} L${pt(p0)} L${pt(p1)} Z" fill="#E03131" fill-opacity="${f(op * 0.7)}" stroke="#E03131" stroke-width="${f(0.9 * k)}" stroke-dasharray="${f(3 * k)} ${f(3 * k)}" stroke-opacity="0.8"/>`;
+      }
+      const lc = v.cat === 'hidden' ? '#E03131' : c;
+      const lo = strong ? 0.9 : 0.45;
+      h += `<path d="M${pt(v.s.a)} L${pt(e)} L${pt(v.s.b)}" fill="none" stroke="${lc}" stroke-opacity="${lo}" stroke-width="${f(1.3 * k)}"/>`;
+      h += `<line x1="${f(v.s.a.x)}" y1="${f(v.s.a.y)}" x2="${f(v.s.b.x)}" y2="${f(v.s.b.y)}" stroke="${lc}" stroke-opacity="${lo}" stroke-width="${f(4 * k)}" stroke-linecap="round"/>`;
+      let label = `${v.s.name} · ${fmtM(v.dist)}`;
+      if (!cone.free) label += ` · ${Math.round(v.ang)}°`;
+      if (v.frac < 0.999) label += ` · ${Math.round(v.frac * 100)} % sichtbar`;
+      const m = G.lerp(e, v.s.p, 0.62);
+      const wpx = label.length * 6.3 + 16;
+      const bg = strong ? lc : '#ffffff';
+      const fg = strong ? '#ffffff' : lc;
+      h += `<g transform="translate(${pt(m)}) scale(${f(k)})"><rect x="${f(-wpx / 2)}" y="-10" width="${f(wpx)}" height="20" rx="10" fill="${bg}" stroke="${lc}" stroke-width="1.2"/><text y="0.5" font-size="11.5" font-weight="700" fill="${fg}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(label)}</text></g>`;
+    }
+    return h;
+  }
+
+  /* Griffe zum Ändern der Größe (Kanten und Ecken) */
+  function resizeHandles(o, k) {
+    const d = def(o);
+    if (!d.resizable || d.wall || o.locked) return '';
+    const lb = G.bbox(app.localBounds(o));
+    const showX = d.handles !== 'd';
+    const showY = d.handles !== 'w' && !d.widthOnly;
+    const corners = showX && showY && !d.round;
+    const cursors = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
+    let h = '';
+    for (const hx of [-1, 0, 1]) {
+      for (const hy of [-1, 0, 1]) {
+        if ((!hx && !hy) || (hx && !showX) || (hy && !showY)) continue;
+        if (hx && hy && !corners) continue;
+        // bei kleinen Objekten nur die Ecken
+        if (corners && !hx && lb.w / k < 34) continue;
+        if (corners && !hy && lb.h / k < 34) continue;
+        const local = { x: hx < 0 ? lb.minX : hx > 0 ? lb.maxX : (lb.minX + lb.maxX) / 2, y: hy < 0 ? lb.minY : hy > 0 ? lb.maxY : (lb.minY + lb.maxY) / 2 };
+        const p = G.toWorld([local], o)[0];
+        const ang = ((G.angle(G.rot({ x: hx, y: hy }, o.rot || 0)) % 180) + 180) % 180;
+        const cur = cursors[Math.round(ang / 45) % 4];
+        h += `<g data-handle="resize" data-hx="${hx}" data-hy="${hy}" transform="translate(${f(p.x)} ${f(p.y)}) scale(${f(k)}) rotate(${f(o.rot || 0)})" style="cursor:${cur}"><circle r="13" fill="transparent"/><rect x="-5" y="-5" width="10" height="10" rx="2" fill="#fff" stroke="#1971C2" stroke-width="1.8"/></g>`;
+      }
+    }
+    return h;
+  }
+
+  /* Griffe an den Wänden zum Ändern der Raumgröße */
+  function roomHandles(k) {
+    const W = app.doc.room.w;
+    const L = app.doc.room.l;
+    const m = WALL / 2;
+    const pts = [
+      [0, -1, W / 2, -m], [0, 1, W / 2, L + m], [-1, 0, -m, L / 2], [1, 0, W + m, L / 2],
+      [-1, -1, -m, -m], [1, -1, W + m, -m], [-1, 1, -m, L + m], [1, 1, W + m, L + m],
+    ];
+    const st = 'fill="#fff" stroke="#1971C2" stroke-width="1.8"';
+    let h = '';
+    for (const [hx, hy, x, y] of pts) {
+      const cur = hx && hy ? (hx === hy ? 'nwse-resize' : 'nesw-resize') : hx ? 'ew-resize' : 'ns-resize';
+      let shape;
+      if (hx && hy) shape = `<rect x="-6" y="-6" width="12" height="12" rx="2.5" ${st}/>`;
+      else if (hy) shape = `<rect x="-18" y="-6" width="36" height="12" rx="6" ${st}/><path d="M-7 -2h14M-7 2h14" stroke="#1971C2" stroke-width="1.4" stroke-linecap="round"/>`;
+      else shape = `<rect x="-6" y="-18" width="12" height="36" rx="6" ${st}/><path d="M-2 -7v14M2 -7v14" stroke="#1971C2" stroke-width="1.4" stroke-linecap="round"/>`;
+      h += `<g data-handle="room" data-hx="${hx}" data-hy="${hy}" transform="translate(${f(x)} ${f(y)}) scale(${f(k)})" style="cursor:${cur}"><circle r="16" fill="transparent"/>${shape}</g>`;
+    }
+    return h;
+  }
+
+  /* Kleines Etikett (z. B. Maße beim Ziehen) */
+  function chip(p, k, text, color) {
+    const wpx = text.length * 7 + 18;
+    return `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${f(k)})" pointer-events="none"><rect x="${f(-wpx / 2)}" y="-12" width="${f(wpx)}" height="24" rx="12" fill="${color || '#1971C2'}"/><text y="0.5" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(text)}</text></g>`;
+  }
 
   /* ---------- Overlay: Auswahl, Griffe, Abstände ---------- */
   app.px = function () {
@@ -460,6 +602,18 @@
       }
       h += `<line x1="${f(anchor.x)}" y1="${f(anchor.y)}" x2="${f(hp.x)}" y2="${f(hp.y)}" stroke="#1971C2" stroke-width="${sw}" pointer-events="none"/>`;
       h += `<g data-handle="rotate" transform="translate(${f(hp.x)} ${f(hp.y)}) scale(${f(k)})" style="cursor:grab"><circle r="16" fill="transparent"/><circle r="10" fill="#fff" stroke="#1971C2" stroke-width="2"/><path d="M-4.5 1.5a4.8 4.8 0 1 0 1.2 -4.6 M-3.6 -6.2v3.4h3.4" fill="none" stroke="#1971C2" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+    }
+    if (selObjs.length === 1 && app.mode === 'select') h += resizeHandles(selObjs[0], k);
+    const dragKind = app.drag && app.drag.kind;
+    if (dragKind === 'resize') {
+      const o = app.drag.o;
+      h += chip(o, k, def(o).round ? `Ø ${Math.round(o.w)} cm` : `${Math.round(o.w)} × ${Math.round(o.d)} cm`);
+    }
+    // Raumgröße: Griffe an den Wänden, solange nichts ausgewählt ist
+    if (app.mode === 'select' && !app.multi && !selObjs.length && (!dragKind || dragKind === 'room' || dragKind === 'pan')) h += roomHandles(k);
+    if (dragKind === 'room') {
+      const R = app.doc.room;
+      h += chip({ x: R.w / 2, y: R.l / 2 }, k, `${fmtM(R.w)} × ${fmtM(R.l)} · ${fmtArea(R.w * R.l)}`);
     }
     // Abstände des ausgewählten Objekts
     if (selObjs.length === 1 && app.overlay.dims) {
@@ -702,14 +856,18 @@
     if (app.clipboard) app.duplicateSelected(app.clipboard, 40);
   };
 
+  /* Stühle, die an den gewählten Tischen stehen und mitwandern */
+  function carriedSeats(objs) {
+    const tableIds = new Set(objs.filter(isTable).map((o) => o.id));
+    if (!tableIds.size || !S().carryChairs) return [];
+    const ids = new Set(objs.map((o) => o.id));
+    return A.attachedSeats(app.doc, tableIds).filter((id) => !ids.has(id)).map(byId).filter((o) => o && !o.locked);
+  }
+
   app.rotateSelected = function (delta) {
     const objs = app.selectedObjects().filter((o) => !o.locked && !def(o).wall);
     if (!objs.length) return;
-    const ids = new Set(objs.map((o) => o.id));
-    const tableIds = new Set(objs.filter((o) => o.type === 'table').map((o) => o.id));
-    let carried = [];
-    if (tableIds.size && S().carryChairs) carried = A.attachedSeats(app.doc, tableIds).filter((id) => !ids.has(id)).map(byId);
-    const all = objs.concat(carried);
+    const all = objs.concat(carriedSeats(objs));
     const c = objs.length === 1 ? { x: objs[0].x, y: objs[0].y } : bboxCenter(objs);
     app.mutate(() => {
       for (const o of all) {
@@ -724,13 +882,9 @@
   app.moveSelected = function (dx, dy) {
     const objs = app.selectedObjects().filter((o) => !o.locked);
     if (!objs.length) return;
-    const ids = new Set(objs.map((o) => o.id));
-    const tableIds = new Set(objs.filter((o) => o.type === 'table').map((o) => o.id));
-    let carried = [];
-    if (tableIds.size && S().carryChairs) carried = A.attachedSeats(app.doc, tableIds).filter((id) => !ids.has(id)).map(byId);
     const now = performance.now();
     const before = app.serialize();
-    for (const o of objs.concat(carried)) {
+    for (const o of objs.concat(carriedSeats(objs))) {
       if (def(o).wall) {
         const along = G.rot({ x: 1, y: 0 }, o.rot || 0);
         const t = dx * along.x + dy * along.y;
@@ -745,27 +899,34 @@
     app.changed({ fast: true });
   };
 
-  /* Alle zusammenhängenden Tische (berührend) samt angestellter Stühle auswählen */
+  /* Zusammenhängende Gruppe auswählen: berührende Tische samt angestellter Stühle
+     bzw. zusammengesteckte Trennwände */
   app.selectGroup = function (id) {
     const start = byId(id);
-    if (!start || start.type !== 'table') return;
-    const tables = app.doc.objects.filter((o) => o.type === 'table');
-    const polys = new Map(tables.map((t) => [t.id, tableWorld(t)]));
+    if (!start) return;
+    let members;
+    let linked;
+    if (isTable(start)) {
+      members = app.doc.objects.filter(isTable);
+      const polys = new Map(members.map((t) => [t.id, tableWorld(t)]));
+      const reach = new Map(members.map((t) => [t.id, A.reach(polys.get(t.id), t)]));
+      linked = (a, b) =>
+        Math.hypot(a.x - b.x, a.y - b.y) <= reach.get(a.id) + reach.get(b.id) + 3 && G.polyDistance(polys.get(a.id), polys.get(b.id)).d < 3;
+    } else if (start.type === 'partition') {
+      members = app.doc.objects.filter((o) => o.type === 'partition');
+      linked = A.partitionsJoined;
+    } else return;
     const group = new Set([id]);
-    const queue = [id];
+    const queue = [start];
     while (queue.length) {
       const cur = queue.shift();
-      const cp = polys.get(cur);
-      const co = byId(cur);
-      for (const t of tables) {
-        if (group.has(t.id) || Math.abs(t.x - co.x) > 200 || Math.abs(t.y - co.y) > 200) continue;
-        if (G.polyDistance(cp, polys.get(t.id)).d < 3) {
-          group.add(t.id);
-          queue.push(t.id);
-        }
+      for (const m of members) {
+        if (group.has(m.id) || !linked(cur, m)) continue;
+        group.add(m.id);
+        queue.push(m);
       }
     }
-    const seats = A.attachedSeats(app.doc, group);
+    const seats = isTable(start) ? A.attachedSeats(app.doc, group) : [];
     app.select([...group, ...seats]);
   };
 
@@ -781,7 +942,7 @@
     const preset = LLR.PRESETS.find((p) => p.id === id);
     if (!preset) return;
     app.mutate((doc) => {
-      doc.objects = doc.objects.filter((o) => !(o.type === 'table' || o.type === 'chair' || o.type === 'stool' || (preset.shelves && o.type === 'shelfRound')));
+      doc.objects = doc.objects.filter((o) => !(isTable(o) || o.type === 'chair' || o.type === 'stool' || (preset.shelves && o.type === 'shelfRound')));
       const added = app.buildPreset(preset, doc);
       if (!preset.shelves) {
         // Halbrunde Regale, die im Weg stehen, zurück an ihren Parkplatz
@@ -796,6 +957,33 @@
     });
     app.sel = new Set();
     app.emit('select');
+  };
+
+  /* ---------- Raumgröße ---------- */
+  app.roomSnapshot = () => ({
+    w: app.doc.room.w,
+    l: app.doc.room.l,
+    objs: app.doc.objects.map((o) => ({ o, x: o.x, y: o.y, bb: def(o).wall ? null : G.bbox([].concat(...app.worldParts(o))) })),
+  });
+
+  /* sides: { l, t, r, b } in cm, positiv = Wand nach außen. Möbel an einer Wand
+     wandern mit dieser Wand, alles andere bleibt an seinem Platz im Raum. */
+  app.applyRoomResize = function (snap, sides) {
+    const W = snap.w + sides.l + sides.r;
+    const L = snap.l + sides.t + sides.b;
+    app.doc.room.w = W;
+    app.doc.room.l = L;
+    for (const s of snap.objs) {
+      const o = s.o;
+      if (!s.bb) {
+        o.x = Math.abs(s.x) < 1 ? 0 : Math.abs(s.x - snap.w) < 1 ? W : s.x + sides.l;
+        o.y = Math.abs(s.y) < 1 ? 0 : Math.abs(s.y - snap.l) < 1 ? L : s.y + sides.t;
+        snapToWall(o, { x: o.x, y: o.y });
+        continue;
+      }
+      o.x = s.bb.minX < 4 ? s.x : snap.w - s.bb.maxX < 4 ? s.x + sides.l + sides.r : s.x + sides.l;
+      o.y = s.bb.minY < 4 ? s.y : snap.l - s.bb.maxY < 4 ? s.y + sides.t + sides.b : s.y + sides.t;
+    }
   };
 
   function bboxCenter(objs) {
@@ -823,28 +1011,33 @@
   }
   app.snapToWall = snapToWall;
 
-  const tableWorld = (o) => G.toWorld(LLR.tablePoly(S()), o);
+  /* Tischfläche (Dreieck oder Rechteck) als konvexes Polygon, immer gleich
+     umlaufend – nur dann liegen anstoßende Kanten gegenläufig */
+  const tableWorld = (o) => {
+    const p = app.worldParts(o)[0];
+    return G.signedArea(p) > 0 ? p.slice().reverse() : p;
+  };
 
   function findTableSnaps(primaries, exclude, allowRot) {
-    const moving = primaries.filter((o) => o.type === 'table');
+    const moving = primaries.filter(isTable);
     if (!moving.length) return [];
-    const statics = app.doc.objects.filter((o) => o.type === 'table' && !exclude.has(o.id));
+    const statics = app.doc.objects.filter((o) => isTable(o) && !exclude.has(o.id)).map((o) => ({ st: o, sp: tableWorld(o) }));
     const TH = 12 * Math.max(1, app.px());
     const ANG = allowRot ? 12 : 1.5;
     const found = [];
     for (const mt of moving) {
       const mp = tableWorld(mt);
-      for (let i = 0; i < 3; i++) {
+      const mr = A.reach(mp, mt);
+      for (let i = 0; i < mp.length; i++) {
         const a = mp[i];
-        const b = mp[(i + 1) % 3];
+        const b = mp[(i + 1) % mp.length];
         const angA = G.angle(G.sub(b, a));
         const midA = G.lerp(a, b, 0.5);
-        for (const st of statics) {
-          if (Math.abs(st.x - mt.x) > 220 || Math.abs(st.y - mt.y) > 220) continue;
-          const sp = tableWorld(st);
-          for (let j = 0; j < 3; j++) {
+        for (const { st, sp } of statics) {
+          if (Math.hypot(st.x - mt.x, st.y - mt.y) > mr + A.reach(sp, st) + TH) continue;
+          for (let j = 0; j < sp.length; j++) {
             const c = sp[j];
-            const d = sp[(j + 1) % 3];
+            const d = sp[(j + 1) % sp.length];
             const dAng = G.normAngle(G.angle(G.sub(c, d)) - angA);
             if (Math.abs(dAng) > ANG) continue;
             const nS = G.edgeNormal(sp, j);
@@ -867,18 +1060,57 @@
 
   /* Prüft, ob sich bewegte Tische mit stehenden Tischen überschneiden */
   function tablesOverlap(items, exclude) {
-    const moving = items.filter((o) => o.type === 'table').map(tableWorld);
+    const moving = items.filter(isTable).map(tableWorld);
     if (!moving.length) return false;
     for (const st of app.doc.objects) {
-      if (st.type !== 'table' || exclude.has(st.id)) continue;
+      if (!isTable(st) || exclude.has(st.id)) continue;
       const sp = tableWorld(st);
       for (const mp of moving) if (G.satDepth(mp, sp) > 1) return true;
     }
     return false;
   }
 
+  /* Trennwände Ende an Ende (gerade, im 45°- oder 90°-Winkel) oder als T an
+     der Wandlinie einer anderen Trennwand zusammenstecken */
+  function snapPartition(p, exclude) {
+    const TH = 14 * Math.max(1, app.px());
+    const ends = A.partitionEnds(p);
+    let best = null;
+    for (const s of app.doc.objects) {
+      if (s.type !== 'partition' || exclude.has(s.id)) continue;
+      if (Math.hypot(s.x - p.x, s.y - p.y) > ((s.w || 120) + (p.w || 120)) / 2 + TH) continue;
+      const se = A.partitionEnds(s);
+      for (let i = 0; i < 2; i++) {
+        for (const q of se) {
+          const d = G.dist(ends[i], q);
+          if (d < TH && (!best || d < best.d)) best = { d, i, s, target: q, tee: false };
+        }
+        const q = G.closestOnSeg(ends[i], se[0], se[1]);
+        const d = G.dist(ends[i], q);
+        if (q.t > 0.05 && q.t < 0.95 && d < TH && (!best || d < best.d - 3)) best = { d, i, s, target: { x: q.x, y: q.y }, tee: true };
+      }
+    }
+    if (!best) return false;
+    const rel = G.normAngle((p.rot || 0) - (best.s.rot || 0));
+    const goal = best.tee ? (rel >= 0 ? 90 : -90) : Math.round(rel / 45) * 45;
+    const dAng = G.normAngle(goal - rel);
+    if (Math.abs(dAng) < (best.tee ? 20 : 12)) {
+      const pivot = ends[best.i];
+      const c = G.add(pivot, G.rot(G.sub(p, pivot), dAng));
+      p.x = c.x;
+      p.y = c.y;
+      p.rot = G.normAngle((p.rot || 0) + dAng);
+    }
+    const e = A.partitionEnds(p)[best.i];
+    p.x += best.target.x - e.x;
+    p.y += best.target.y - e.y;
+    return true;
+  }
+
   function applySnap(primaries, items, e) {
-    if (!S().snap || (e && e.altKey)) return;
+    if (!primaries.length || (e && e.altKey)) return;
+    const magnet = S().snap;
+    if (!magnet && !S().gridSnap) return;
     const exclude = new Set(items.map((o) => o.id));
     const shiftAll = (dx, dy) => {
       for (const o of items) {
@@ -888,7 +1120,8 @@
     };
     const single = primaries.length === 1 ? primaries[0] : null;
     let snapped = false;
-    const snaps = findTableSnaps(primaries, exclude, !!single);
+    let joined = false;
+    const snaps = magnet ? findTableSnaps(primaries, exclude, !!single) : [];
     const saved = items.map((o) => ({ o, x: o.x, y: o.y, rot: o.rot }));
     const restore = () => saved.forEach((r) => Object.assign(r.o, { x: r.x, y: r.y, rot: r.rot }));
     for (const sn of snaps.slice(0, 8)) {
@@ -903,10 +1136,10 @@
       }
       const mp = tableWorld(sn.mt);
       const a = mp[sn.i];
-      const b = mp[(sn.i + 1) % 3];
+      const b = mp[(sn.i + 1) % mp.length];
       const sp = tableWorld(sn.st);
       const c = sp[sn.j];
-      const d = sp[(sn.j + 1) % 3];
+      const d = sp[(sn.j + 1) % sp.length];
       const nS = G.edgeNormal(sp, sn.j);
       const perp = G.dot(G.sub(G.lerp(a, b, 0.5), c), nS);
       shiftAll(-nS.x * perp, -nS.y * perp);
@@ -926,14 +1159,14 @@
       restore();
     }
     // Stuhl zum nächsten Tisch ausrichten
-    if (!snapped && single && (single.type === 'chair' || single.type === 'wheelchair')) {
+    if (magnet && !snapped && single && (single.type === 'chair' || single.type === 'wheelchair')) {
       let best = null;
       for (const t of app.doc.objects) {
-        if (t.type !== 'table') continue;
-        if (Math.abs(t.x - single.x) > 160 || Math.abs(t.y - single.y) > 160) continue;
+        if (!isTable(t)) continue;
         const p = tableWorld(t);
-        for (let i = 0; i < 3; i++) {
-          const q = G.closestOnSeg(single, p[i], p[(i + 1) % 3]);
+        if (Math.hypot(t.x - single.x, t.y - single.y) > A.reach(p, t) + 100) continue;
+        for (let i = 0; i < p.length; i++) {
+          const q = G.closestOnSeg(single, p[i], p[(i + 1) % p.length]);
           if (q.t < 0.06 || q.t > 0.94) continue;
           const n = G.edgeNormal(p, i);
           const dist = G.dot(G.sub(single, q), n);
@@ -952,6 +1185,14 @@
         snapped = true;
       }
     }
+    if (magnet && !snapped && single && single.type === 'partition') snapped = joined = snapPartition(single, exclude);
+    // Am Raster einrasten (linke obere Ecke der Auswahl auf eine Rasterlinie)
+    if (!snapped && S().gridSnap) {
+      const g = S().grid || 50;
+      const gb = G.bbox([].concat(...primaries.map((o) => app.worldParts(o)).flat()));
+      shiftAll(Math.round(gb.minX / g) * g - gb.minX, Math.round(gb.minY / g) * g - gb.minY);
+    }
+    if (!magnet || joined) return;
     // An Wände anlegen
     const W = app.doc.room.w;
     const L = app.doc.room.l;
@@ -968,6 +1209,7 @@
 
   /* ---------- Zeiger-Bedienung ---------- */
   let spaceDown = false;
+  const EDIT_DRAGS = new Set(['move', 'rotate', 'resize', 'room']);
 
   function bindPointer(svg) {
     svg.addEventListener('pointerdown', onDown);
@@ -996,7 +1238,7 @@
 
   function startPinch() {
     const pts = [...app.pointers.values()];
-    if (app.drag && app.drag.kind === 'move' && app.drag.moved) finishMove();
+    if (app.drag && EDIT_DRAGS.has(app.drag.kind) && app.drag.moved) finishMove();
     app.drag = {
       kind: 'pinch',
       d0: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
@@ -1045,6 +1287,7 @@
     if (app.pointers.size > 2) return;
     const p = app.toWorld(e.clientX, e.clientY);
     const base = { pointerId: e.pointerId, startClient: { x: e.clientX, y: e.clientY }, start: p, moved: false, touch: e.pointerType !== 'mouse' };
+    app.drag = null;
 
     if ((e.pointerType === 'mouse' && (e.button === 1 || e.button === 2)) || spaceDown) {
       app.drag = Object.assign(base, { kind: 'pan', view0: Object.assign({}, app.view), k0: app.px(), tapClears: false });
@@ -1059,8 +1302,13 @@
     }
     const handle = e.target.closest('[data-handle]');
     if (handle) {
-      startRotate(base, p);
-      return;
+      const kind = handle.getAttribute('data-handle');
+      const hx = Number(handle.getAttribute('data-hx')) || 0;
+      const hy = Number(handle.getAttribute('data-hy')) || 0;
+      if (kind === 'rotate') startRotate(base, p);
+      else if (kind === 'resize') startResize(base, hx, hy);
+      else if (kind === 'room' && !app.multi && !e.shiftKey) startRoomResize(base, hx, hy);
+      if (app.drag) return;
     }
     const objEl = e.target.closest('[data-id]');
     if (objEl) {
@@ -1092,11 +1340,7 @@
   }
 
   function collectItems(primaries) {
-    const ids = new Set(primaries.map((o) => o.id));
-    const tableIds = new Set(primaries.filter((o) => o.type === 'table').map((o) => o.id));
-    let carried = [];
-    if (tableIds.size && S().carryChairs) carried = A.attachedSeats(app.doc, tableIds).filter((id) => !ids.has(id)).map(byId).filter((o) => !o.locked);
-    return primaries.concat(carried);
+    return primaries.concat(carriedSeats(primaries));
   }
 
   function startMove(base, id) {
@@ -1131,6 +1375,87 @@
       orig: items.map((o) => ({ o, x: o.x, y: o.y, rot: o.rot || 0 })),
       before: app.serialize(),
     });
+  }
+
+  function startResize(base, hx, hy) {
+    const o = app.selectedObjects()[0];
+    if (!o || o.locked) return;
+    const d = def(o);
+    const lb = G.bbox(app.localParts(o).flat());
+    app.drag = Object.assign(base, {
+      kind: 'resize',
+      o,
+      hx,
+      hy,
+      o0: { x: o.x, y: o.y, rot: o.rot || 0, w: o.w || lb.w, d: o.d || (d.round ? o.w : lb.h) || lb.h },
+      before: app.serialize(),
+    });
+  }
+
+  function startRoomResize(base, hx, hy) {
+    app.drag = Object.assign(base, {
+      kind: 'room',
+      hx,
+      hy,
+      snap: app.roomSnapshot(),
+      view0: Object.assign({}, app.view),
+      k0: app.px(),
+      before: app.serialize(),
+      tapClears: true,
+    });
+  }
+
+  /* Größe per Griff ändern: die gegenüberliegende Kante bleibt stehen */
+  function resizeTo(dr, p, e) {
+    const o = dr.o;
+    const o0 = dr.o0;
+    const d = def(o);
+    const ms = d.minSize || { w: 5, d: 5 };
+    const q = G.toLocal(p, o0);
+    const step = e.altKey ? 1 : 5;
+    const size = (v, min) => clamp(Math.round(v / step) * step, min, 2000);
+    let w = o0.w;
+    let dd = o0.d;
+    if (d.round) {
+      w = dd = size((dr.hx ? dr.hx * q.x : dr.hy * q.y) + o0.w / 2, ms.w);
+    } else {
+      if (dr.hx) w = size(dr.hx * q.x + o0.w / 2, ms.w);
+      if (dr.hy) dd = size(dr.hy * q.y + o0.d / 2, ms.d);
+      if (e.shiftKey && dr.hx && dr.hy) {
+        const sc = Math.max(w / o0.w, dd / o0.d);
+        w = size(o0.w * sc, ms.w);
+        dd = size(o0.d * sc, ms.d);
+      }
+    }
+    const c = G.add(G.rot({ x: (dr.hx * (w - o0.w)) / 2, y: (dr.hy * (dd - o0.d)) / 2 }, o0.rot), o0);
+    o.x = c.x;
+    o.y = c.y;
+    o.w = w;
+    o.d = dd;
+    app.renderObjects();
+    app.problems = A.problems(app.doc);
+    app.renderOverlay();
+    app.scheduleAnalysis(150);
+    app.emit('live');
+  }
+
+  /* Raumgröße per Wand/Griff ändern (5-cm-Schritte, Alt = 1 cm) */
+  function resizeRoomTo(dr, dxC, dyC, e) {
+    const step = e.altKey ? 1 : 5;
+    const fit = (size0, delta) => clamp(Math.round((size0 + delta) / step) * step, 200, 3000) - size0;
+    const sides = { l: 0, t: 0, r: 0, b: 0 };
+    if (dr.hx) sides[dr.hx > 0 ? 'r' : 'l'] = fit(dr.snap.w, dr.hx * dxC * dr.k0);
+    if (dr.hy) sides[dr.hy > 0 ? 'b' : 't'] = fit(dr.snap.l, dr.hy * dyC * dr.k0);
+    app.applyRoomResize(dr.snap, sides);
+    // Ansicht mitschieben, damit die gegenüberliegende Wand stehen bleibt
+    app.view.x = dr.view0.x + sides.l;
+    app.view.y = dr.view0.y + sides.t;
+    app.renderRoom();
+    app.renderObjects();
+    app.problems = A.problems(app.doc);
+    app.scheduleAnalysis(150);
+    app.applyView();
+    app.emit('live');
   }
 
   function onMove(e) {
@@ -1204,6 +1529,10 @@
       }
       dr.angle = delta;
       liveUpdate(dr.items);
+    } else if (dr.kind === 'resize') {
+      resizeTo(dr, p, e);
+    } else if (dr.kind === 'room') {
+      resizeRoomTo(dr, dxC, dyC, e);
     } else if (dr.kind === 'marquee') {
       const x = Math.min(dr.start.x, p.x);
       const y = Math.min(dr.start.y, p.y);
@@ -1262,7 +1591,7 @@
       return;
     }
     if (e.pointerId !== dr.pointerId) return;
-    if ((dr.kind === 'move' || dr.kind === 'rotate') && dr.moved) finishMove();
+    if (EDIT_DRAGS.has(dr.kind) && dr.moved) finishMove();
     else if (dr.tapId && !dr.moved) {
       // Doppelklick / Doppeltipp auf ein Objekt
       const now = performance.now();
@@ -1270,16 +1599,18 @@
       if (last && last.id === dr.tapId && now - last.t < 420) {
         app._lastTap = null;
         const o = byId(dr.tapId);
-        if (o && o.type === 'table') app.selectGroup(o.id);
+        if (o && (isTable(o) || o.type === 'partition')) app.selectGroup(o.id);
         else if (o) app.emit('edit', o.id);
       } else app._lastTap = { id: dr.tapId, t: now };
-    } else if (dr.kind === 'pan' && !dr.moved && dr.tapClears) {
+    } else if ((dr.kind === 'pan' || dr.kind === 'room') && !dr.moved && dr.tapClears) {
       app.clearSelection();
       if (app.measure) {
         app.measure = null;
         app.renderOverlay();
       }
     } else if (dr.kind === 'marquee') {
+      // Mehrfachauswahl: Tippen ins Leere hebt die Auswahl auf
+      if (!dr.moved && app.multi) app.clearSelection();
       dr.rect = null;
     } else if (dr.kind === 'measure') {
       if (G.dist(app.measure.a, app.measure.b) < 2) app.measure = null;
@@ -1329,9 +1660,15 @@
         app.deleteSelected();
       }
     } else if (k === 'Escape') {
+      const had = app.sel.size;
       if (app.mode !== 'select') app.setMode('select');
       app.measure = null;
       app.clearSelection();
+      // zweites Esc beendet die Mehrfachauswahl
+      if (!had && app.multi) {
+        app.multi = false;
+        app.emit('mode');
+      }
       app.renderOverlay();
     } else if (k.startsWith('Arrow') && app.sel.size) {
       e.preventDefault();
