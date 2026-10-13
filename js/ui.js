@@ -1,4 +1,5 @@
-/* Bedienoberfläche: Panels, Dialoge, Speichern/Teilen/Export */
+/* Bedienoberfläche: Bibliothek, Details & Prüfen, Werkzeuge, Dialoge,
+   Speichern/Teilen/Export. Lernende und Phasen: js/ui-class.js */
 (function (LLR) {
   'use strict';
   const G = LLR.G;
@@ -9,18 +10,20 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const KEY_PLANS = 'llr2d.plans.v1';
-  const KEY_SEEN = 'llr2d.seen.v1';
-  const KEY_PANELS = 'llr2d.panels.v1';
+  const KEY_SEEN = 'llr2d.seen.v2';
+  const KEY_PANELS = 'llr2d.panels.v2';
   const mobile = () => window.matchMedia('(max-width: 900px)').matches;
   const phone = () => window.matchMedia('(max-width: 600px)').matches;
   const icon = (id) => `<svg aria-hidden="true"><use href="#${id}"/></svg>`;
   const num = (v, d) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: d === undefined ? 1 : d });
+  const m1 = (cm) => num(cm / 100, 1) + ' m';
   const ZONE_NAMES = ['Präsentation', 'Gruppenarbeit', 'Einzelarbeit', 'Ruhezone', 'Rückzug', 'Lounge', 'Lehrkraft', 'Material', 'Bewegung', 'Garderobe'];
   const GRID_SIZES = [10, 20, 25, 50, 100];
+  const TABS = { catalog: 'Möbel', presets: 'Anordnungen', learners: 'Lernende & Sitzplan', phases: 'Unterrichtsphasen', objects: 'Im Raum' };
 
-  /* Auf- und zugeklappte Bereiche (Seitenleisten, Prüf-Abschnitte, Legende) */
+  /* Zustand der Oberfläche (im Browser gemerkt) */
   const panels = (() => {
-    const def = { left: true, right: true, access: false, sight: false, seats: true, zones: true, legend: !phone(), tips: true };
+    const def = { left: true, right: true, tab: 'catalog', view: 'props', cats: {}, legend: !phone(), pos: false };
     try {
       return Object.assign(def, JSON.parse(localStorage.getItem(KEY_PANELS) || '{}'));
     } catch (e) {
@@ -40,7 +43,7 @@
     const a = document.activeElement;
     let sel = null;
     if (a && a !== box && box.contains(a)) {
-      for (const attr of ['data-acc-toggle', 'data-ov', 'data-pref', 'data-act', 'data-legend']) {
+      for (const attr of ['data-lens-toggle', 'data-ov', 'data-pref', 'data-act', 'data-legend', 'data-cat']) {
         if (a.hasAttribute(attr)) {
           sel = `[${attr}="${a.getAttribute(attr)}"]`;
           break;
@@ -54,8 +57,13 @@
     }
   }
 
-  /* Sichtmarke als kleines Inline-Bild (wie im Plan) */
+  /* Kleine Marken wie im Plan */
   const glyph = (cat) => `<svg class="sg" viewBox="-8.5 -8.5 17 17" aria-hidden="true">${LLR.sightGlyph(cat)}</svg>`;
+  const sglyph = (lv, sym) => `<svg class="sg" viewBox="-8.5 -8.5 17 17" aria-hidden="true">${LLR.statusGlyph(lv, sym)}</svg>`;
+  const tglyph = (cat) => sglyph(...LLR.TEACHER_GLYPH[cat]);
+  const cglyph = (cat) => sglyph(...LLR.CALM_GLYPH[cat]);
+  const dot = (lv) => `<span class="dot l${lv}" aria-hidden="true"></span>`;
+  const row = (cls, ic, txt, small) => `<div class="check-row ${cls}">${icon(ic)}<span class="txt">${txt}${small ? `<small>${small}</small>` : ''}</span></div>`;
 
   /* ---------- Toast ---------- */
   let toastTimer = null;
@@ -64,7 +72,7 @@
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3400);
   }
   app.on('toast', toast);
 
@@ -73,8 +81,9 @@
     const d = T[o.type];
     const S = app.doc ? app.doc.settings : LLR.DEFAULT_SETTINGS;
     const b = G.bbox(d.bounds ? d.bounds(o, S) : [].concat(...d.parts(o, S)));
-    const pad = Math.max(b.w, b.h) * 0.08 + 2;
-    return `<svg class="${cls || 'thumb'}" viewBox="${b.minX - pad} ${b.minY - pad} ${b.w + 2 * pad} ${b.h + 2 * pad}" aria-hidden="true">${d.draw(o, S)}</svg>`;
+    const pad = Math.max(b.w, b.h) * 0.08 + 3;
+    const sh = d.shadow ? `<g transform="translate(${app.SHADOW_OFF.x} ${app.SHADOW_OFF.y})">${app.shadowMarkup(o).replace(/<g class="shadow"[^>]*>|<\/g>$/g, '')}</g>` : '';
+    return `<svg class="${cls || 'thumb'}" viewBox="${b.minX - pad} ${b.minY - pad} ${b.w + 2 * pad} ${b.h + 2 * pad}" aria-hidden="true">${sh}${d.draw(o, S)}</svg>`;
   }
   function sample(type) {
     const d = T[type];
@@ -91,22 +100,66 @@
     return o;
   }
 
+  /* Kleine Vorschau einer Anordnung (Anordnungen, Phasen) */
+  function planPreview(objs, opts) {
+    opts = opts || {};
+    const S = app.doc ? app.doc.settings : LLR.DEFAULT_SETTINGS;
+    const list = opts.only ? objs.filter(opts.only) : objs;
+    const pts = [];
+    for (const o of list) pts.push(...[].concat(...T[o.type].parts(o, S)).map((q) => G.add(G.rot(q, o.rot || 0), o)));
+    let b = pts.length ? G.bbox(pts) : { minX: 0, minY: 0, maxX: 100, maxY: 100, w: 100, h: 100 };
+    if (opts.room) b = { minX: 0, minY: 0, maxX: opts.room.w, maxY: opts.room.l, w: opts.room.w, h: opts.room.l };
+    const pad = opts.room ? 10 : 12;
+    const side = Math.max(b.w, b.h) + 2 * pad;
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    let inner = opts.room ? `<rect x="0" y="0" width="${opts.room.w}" height="${opts.room.l}" fill="#FBF8F2" stroke="#5B6168" stroke-width="10"/>` : '';
+    for (const o of list) {
+      const d = T[o.type];
+      if (d.kind === 'zone' || d.kind === 'label') continue;
+      inner += `<g transform="translate(${o.x.toFixed(1)} ${o.y.toFixed(1)}) rotate(${(o.rot || 0).toFixed(1)})">${d.draw(o, S)}</g>`;
+    }
+    return `<svg class="pv" viewBox="${cx - side / 2} ${cy - side / 2} ${side} ${side}" aria-hidden="true">${inner}</svg>`;
+  }
+
   /* ---------- Katalog ---------- */
   function renderCatalog() {
     const box = $('#tab-catalog');
-    let h = '';
+    let h = `<label class="search">${icon('i-search')}<span class="visually-hidden">Möbel suchen</span><input type="search" id="cat-search" placeholder="Möbel suchen …" autocomplete="off"></label><div id="cat-list">`;
     for (const c of LLR.CATEGORIES) {
       const types = Object.keys(T).filter((k) => T[k].cat === c.id);
       if (!types.length) continue;
-      h += `<h3 class="cat-title">${esc(c.name)}</h3><div class="cat-grid">`;
+      const open = panels.cats[c.id] !== false;
+      h += `<section class="cat" data-catsec="${c.id}"><button class="cat-head" data-cat="${c.id}" aria-expanded="${open}">${icon('i-chevron')}${esc(c.name)}<span class="n">${types.length}</span></button><div class="cat-grid"${open ? '' : ' hidden'}>`;
       for (const k of types) {
-        h += `<button class="cat-item" data-type="${k}" draggable="true" title="${esc(T[k].desc || T[k].name)}">${thumb(sample(k))}<span class="name">${esc(T[k].name)}</span><span class="badge" data-badge="${k}"></span></button>`;
+        const d = T[k];
+        h += `<button class="cat-item" data-type="${k}" data-search="${esc((d.name + ' ' + (d.label || '') + ' ' + (d.desc || '')).replace(/\u00AD/g, '').toLowerCase())}" draggable="true" title="${esc(d.name + ' – ' + (d.desc || ''))}">${thumb(sample(k))}<span class="name">${esc(d.label || d.name)}</span><span class="badge" data-badge="${k}"></span></button>`;
       }
-      h += `</div>`;
+      h += `</div></section>`;
     }
-    h += `<p class="cat-note">Antippen fügt das Objekt in der Bildmitte ein. Am Computer auch per Drag & Drop. Zahlen = im Plan / im LLR vorhanden.</p>`;
+    h += `</div><p class="empty-note" id="cat-empty" hidden>Nichts gefunden.</p><p class="cat-note">Antippen fügt das Objekt in der Bildmitte ein, am Computer auch per Ziehen. Zahlen: im Plan / im LLR vorhanden.</p>`;
     box.innerHTML = h;
     updateBadges();
+  }
+
+  function filterCatalog(q) {
+    q = q.trim().toLowerCase();
+    let any = false;
+    for (const sec of $$('#cat-list .cat')) {
+      let n = 0;
+      for (const it of $$('.cat-item', sec)) {
+        const hit = !q || it.getAttribute('data-search').includes(q);
+        it.hidden = !hit;
+        if (hit) n++;
+      }
+      sec.hidden = !n;
+      const grid = $('.cat-grid', sec);
+      const open = q ? true : panels.cats[sec.getAttribute('data-catsec')] !== false;
+      grid.hidden = !open;
+      $('.cat-head', sec).setAttribute('aria-expanded', String(open));
+      if (n) any = true;
+    }
+    $('#cat-empty').hidden = any;
   }
 
   function updateBadges() {
@@ -118,6 +171,7 @@
       b.className = 'badge';
       if (d.inv) {
         b.textContent = `${n}/${d.inv}`;
+        b.hidden = false;
         if (n === d.inv) b.classList.add('full');
         if (n > d.inv) b.classList.add('over');
       } else {
@@ -130,6 +184,15 @@
   function bindCatalog() {
     const box = $('#tab-catalog');
     box.addEventListener('click', (e) => {
+      const head = e.target.closest('[data-cat]');
+      if (head) {
+        const id = head.getAttribute('data-cat');
+        panels.cats[id] = head.getAttribute('aria-expanded') !== 'true';
+        savePanels();
+        head.setAttribute('aria-expanded', String(panels.cats[id]));
+        head.nextElementSibling.hidden = !panels.cats[id];
+        return;
+      }
       const it = e.target.closest('.cat-item');
       if (!it) return;
       const type = it.getAttribute('data-type');
@@ -137,7 +200,11 @@
       const n = app.stats().count[type] || 0;
       app.addObject(type);
       if (d.inv && n + 1 > d.inv) toast(`Hinweis: Im LLR gibt es nur ${d.inv} × „${d.short}“. Zusätzliche müssen aus anderen Räumen kommen.`);
+      if (type === 'teacher' && !app.overlay.teacher) setLens('teacher');
       if (mobile()) closeDrawers();
+    });
+    box.addEventListener('input', (e) => {
+      if (e.target.id === 'cat-search') filterCatalog(e.target.value);
     });
     box.addEventListener('dragstart', (e) => {
       const it = e.target.closest('.cat-item');
@@ -147,7 +214,7 @@
     });
     const svg = $('#plan');
     svg.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('text/llr-type')) {
+      if (e.dataTransfer.types.includes('text/llr-type') || e.dataTransfer.types.includes('text/llr-learner')) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
       }
@@ -161,28 +228,11 @@
   }
 
   /* ---------- Anordnungen ---------- */
-  function presetPreview(p) {
-    const S = LLR.DEFAULT_SETTINGS;
-    const room = LLR.DEFAULT_ROOM;
-    const objs = p.build(S, room);
-    const pts = [];
-    for (const o of objs) pts.push(...[].concat(...T[o.type].parts(o, S)).map((q) => G.add(G.rot(q, o.rot), o)));
-    const b = G.bbox(pts);
-    const pad = 12;
-    const side = Math.max(b.w, b.h) + 2 * pad;
-    const cx = (b.minX + b.maxX) / 2;
-    const cy = (b.minY + b.maxY) / 2;
-    let inner = '';
-    for (const o of LLR.colorChairs(objs)) {
-      inner += `<g transform="translate(${o.x.toFixed(1)} ${o.y.toFixed(1)}) rotate(${(o.rot || 0).toFixed(1)})">${T[o.type].draw(o, S)}</g>`;
-    }
-    return `<svg class="pv" viewBox="${cx - side / 2} ${cy - side / 2} ${side} ${side}" aria-hidden="true">${inner}</svg>`;
-  }
-
   function renderPresets() {
-    let h = `<p class="intro">Anordnungen aus der <em>Handreichung zur Anordnung der Tische</em>. Beim Übernehmen werden Tische, Stühle und Hocker neu gestellt – alles andere bleibt. Danach frei anpassbar.</p>`;
+    let h = `<p class="intro">Sitzordnungen aus der <em>Handreichung zur Anordnung der Tische</em>. Beim Übernehmen werden Tische, Stühle und Hocker neu gestellt – alles andere bleibt.</p>`;
     for (const p of LLR.PRESETS) {
-      h += `<button class="preset" data-preset="${p.id}">${presetPreview(p)}<span><h3>${esc(p.name)}</h3><span class="persons">${esc(p.persons)}</span><p>${esc(p.note)}</p><span class="page">Handreichung S. ${p.page}</span></span></button>`;
+      const objs = LLR.colorChairs(p.build(LLR.DEFAULT_SETTINGS, LLR.DEFAULT_ROOM));
+      h += `<button class="preset" data-preset="${p.id}">${planPreview(objs)}<span><h3>${esc(p.name)}</h3><span class="persons">${esc(p.persons)}</span><p>${esc(p.note)}</p></span></button>`;
     }
     $('#tab-presets').innerHTML = h;
   }
@@ -192,14 +242,28 @@
       const b = e.target.closest('[data-preset]');
       if (!b) return;
       const p = LLR.PRESETS.find((x) => x.id === b.getAttribute('data-preset'));
-      const ok = await confirmDlg(
-        p.name,
-        `<p>Tische, Stühle und Hocker werden durch die Anordnung <strong>${esc(p.name)}</strong> (${esc(p.persons)}) ersetzt.${p.shelves ? ' Die halbrunden Regale werden mit umgestellt.' : ''}</p><p class="desc">${esc(p.note)}</p><p class="desc">Rückgängig jederzeit mit <span class="kbd">Strg</span>+<span class="kbd">Z</span>.</p>`,
-        'Übernehmen'
-      );
-      if (!ok) return;
-      app.applyPreset(p.id);
-      toast(`„${p.name}“ übernommen`);
+      const phases = !!app.doc.phases;
+      const v = await openDialog({
+        title: p.name,
+        body: `<p><strong>${esc(p.name)}</strong> · ${esc(p.persons)} · Handreichung S. ${p.page}</p><p class="desc">${esc(p.note)}</p>
+          <label class="toggle"><input type="radio" name="pmode" value="replace" checked><span>${phases ? 'In der aktuellen Phase übernehmen' : 'Übernehmen'}<small>Tische, Stühle und Hocker werden ersetzt${p.shelves ? ', die halbrunden Regale umgestellt' : ''}.</small></span></label>
+          <label class="toggle"><input type="radio" name="pmode" value="phase"><span>Als neue Unterrichtsphase anlegen<small>Die jetzige Anordnung bleibt als eigene Phase erhalten – mit Umbauplan und Übergang.</small></span></label>
+          <p class="desc">Rückgängig jederzeit mit <span class="kbd">Strg</span>+<span class="kbd">Z</span>.</p>`,
+        buttons: [
+          { label: 'Abbrechen', value: 'cancel' },
+          { label: 'Übernehmen', value: 'ok', cls: 'primary' },
+        ],
+        onOpen: (body) => (body._mode = () => (body.querySelector('input[name=pmode]:checked') || {}).value),
+      });
+      if (v !== 'ok') return;
+      const mode = $('#dlg-body')._mode();
+      if (mode === 'phase') {
+        app.addPhase(p.id);
+        toast(`Neue Phase „${p.name}“ angelegt`);
+      } else {
+        app.applyPreset(p.id);
+        toast(`„${p.name}“ übernommen`);
+      }
       if (mobile()) closeDrawers();
     });
   }
@@ -226,7 +290,8 @@
       for (const o of list) {
         counter[o.type] = (counter[o.type] || 0) + 1;
         const d = T[o.type];
-        const name = o.type === 'label' ? `„${o.text || ''}“` : `${d.short} ${counter[o.type]}${o.label ? ' – ' + o.label : ''}`;
+        const person = o.learner ? app.learnerName(o.learner) : '';
+        const name = o.type === 'label' ? `„${o.text || ''}“` : `${d.short} ${counter[o.type]}${person ? ' – ' + person : o.label ? ' – ' + o.label : ''}`;
         const bad = app.problems.has(o.id);
         h += `<li><button data-oid="${o.id}" aria-current="${app.sel.has(o.id)}"><span>${esc(name)}</span><span class="meta">${bad ? `<span class="warn" title="Überschneidung/außerhalb">${icon('i-alert')}</span>` : ''}${o.locked ? `<span title="gesperrt">${icon('i-lock')}</span>` : ''}</span></button></li>`;
       }
@@ -265,64 +330,92 @@
     }
   }
 
-  /* ---------- Eigenschaften ---------- */
+  /* ---------- Details (rechts) ---------- */
   function renderProps() {
     const box = $('#props');
-    if (box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+    if (box.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
     const objs = app.selectedObjects();
-    if (!objs.length) {
-      const r = app.doc.room;
-      box.innerHTML = `<h2 class="sec-title">Raum</h2>
-        <div class="field-grid two">
-          <label class="field">Breite – Tafelseite (m)<input type="number" data-room="w" value="${(r.w / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
-          <label class="field">Länge (m)<input type="number" data-room="l" value="${(r.l / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
-        </div>
-        <table class="stat-table"><tr><td>Fläche</td><td data-room-area>${app.fmtArea(r.w * r.l)}</td></tr></table>
-        <p class="desc">Die Raumgröße lässt sich auch direkt im Plan ändern: an einer Wand oder an den blauen Griffen ziehen.</p>
-        <div class="btn-row"><button class="btn outline small" data-act="settings">${icon('i-sliders')}Raum & Einstellungen</button></div>
-        <details class="callout tips" data-tips ${panels.tips ? 'open' : ''}><summary><strong>So geht's</strong></summary>Objekt antippen und ziehen. Der blaue Kreis über der Auswahl dreht, die kleinen Quadrate ändern die Größe. Tische rasten magnetisch an andere Tische an, angestellte Stühle wandern beim Verschieben mit (abschaltbar über „Einrasten“). Leere Fläche ziehen verschiebt die Ansicht, zwei Finger zoomen. Die Seitenleisten lassen sich über die Symbole oben links und rechts ein- und ausblenden.</details>`;
-      return;
+    if (!objs.length) box.innerHTML = roomProps();
+    else if (objs.length > 1) box.innerHTML = multiProps(objs);
+    else box.innerHTML = objectProps(objs[0]);
+  }
+
+  /* Nichts ausgewählt: Raum und Belegung */
+  function roomProps() {
+    const r = app.doc.room;
+    const st = app.stats();
+    const c = st.count;
+    const inv = (n, max) => `<span class="pill ${n > max ? 'warn' : n === max ? 'ok' : ''}">${n} / ${max}</span>`;
+    let h = `<h2 class="sec-title"><span>Raum<small>Nichts ausgewählt – ein Objekt antippen zeigt seine Details</small></span></h2>
+      <div class="field-grid two">
+        <label class="field">Breite – Tafelseite (m)<input type="number" data-room="w" value="${(r.w / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
+        <label class="field">Länge (m)<input type="number" data-room="l" value="${(r.l / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
+      </div>
+      <p class="desc" style="margin-top:6px">Fläche <strong data-room-area>${app.fmtArea(r.w * r.l)}</strong> · auch im Plan an den Wänden ziehen</p>`;
+    if (app.doc.phases) h += `<div class="sub-title">Phase</div><p class="desc">${app.phaseIndex() + 1} von ${app.doc.phases.length}: <strong>${esc(app.phases()[app.phaseIndex()].name)}</strong> · <button class="link-btn" data-act="openPhases">Phasen verwalten</button></p>`;
+    h += `<div class="sub-title">Belegung</div><table class="stat-table">
+      <tr><td>Arbeitsplätze</td><td><span class="pill ${st.seats > 24 ? 'warn' : 'ok'}">${st.seats}</span></td></tr>
+      <tr><td>Dreieckstische</td><td>${inv(c.table || 0, 12)}</td></tr>
+      ${c.tableRect ? `<tr><td>Rechtecktische</td><td>${c.tableRect}</td></tr>` : ''}
+      <tr><td>Stühle</td><td>${inv(c.chair || 0, 19)}</td></tr>
+      <tr><td>Hocker</td><td>${inv(c.stool || 0, 2)}</td></tr>
+      ${st.wheelchairs ? `<tr><td>Rollstuhlplätze (Test)</td><td>${st.wheelchairs}</td></tr>` : ''}
+      <tr><td>Lounge (Sofa, Sitzsäcke)</td><td>${st.lounge}</td></tr>`;
+    const learners = app.learners();
+    if (learners.length) {
+      const placed = learners.filter((l) => app.seatOf(l.id)).length;
+      h += `<tr><td>Lernende mit Platz</td><td><span class="pill ${placed === learners.length ? 'ok' : 'info'}">${placed} / ${learners.length}</span></td></tr>`;
     }
-    if (objs.length > 1) {
-      const counts = {};
-      for (const o of objs) counts[T[o.type].short] = (counts[T[o.type].short] || 0) + 1;
-      const locked = objs.filter((o) => o.locked).length;
-      box.innerHTML = `<h2 class="sec-title">${objs.length} Objekte ausgewählt</h2>
-        <p class="desc">${Object.entries(counts).map(([k, v]) => `${v} × ${esc(k)}`).join(', ')}${locked ? ` · ${locked} gesperrt` : ''}</p>
-        <div class="btn-row">
-          <button class="btn outline small" data-act="rotl">${icon('i-rot-ccw')}−15°</button>
-          <button class="btn outline small" data-act="rotr">${icon('i-rot-cw')}+15°</button>
-          <button class="btn outline small" data-act="rot90">${icon('i-rot-cw')}90°</button>
-          <button class="btn outline small" data-act="dup">${icon('i-copy')}Duplizieren</button>
-          <button class="btn outline small" data-act="lock">${icon(locked === objs.length ? 'i-unlock' : 'i-lock')}${locked === objs.length ? 'Entsperren' : 'Sperren'}</button>
-          <button class="btn outline small" data-act="del" style="color:var(--bad)">${icon('i-trash')}Löschen</button>
-          <button class="btn outline small" data-act="none">Auswahl aufheben</button>
-        </div>`;
-      return;
+    h += `</table>`;
+    if (st.seats > 24) h += row('warn', 'i-alert', 'Mehr als 24 Arbeitsplätze', 'Die Handreichung empfiehlt höchstens 24 Sitzplätze.');
+    if ((c.chair || 0) > 19) h += row('warn', 'i-info', `${c.chair - 19} Stuhl/Stühle mehr als im LLR vorhanden`, 'Zusätzliche Stühle aus anderen Räumen holen.');
+    const zones = app.doc.objects.filter((o) => T[o.type].kind === 'zone');
+    if (zones.length) {
+      h += `<div class="sub-title">Zonen</div><table class="stat-table">`;
+      for (const z of zones) {
+        const col = (T[z.type].colors[z.color] || T[z.type].colors[T[z.type].defaultColor]).fill;
+        h += `<tr><td><span class="zone-dot" style="background:${col}"></span>${esc(z.label || 'Zone')}</td><td>${LLR.zoneArea(z)}</td></tr>`;
+      }
+      h += `</table>`;
     }
-    const o = objs[0];
+    h += `<div class="btn-row"><button class="btn outline small" data-act="settings">${icon('i-sliders')}Raum &amp; Einstellungen</button></div>`;
+    h += `<p class="tip">${icon('i-info')}<span>Doppelklick auf einen Tisch wählt die ganze Gruppe samt Stühlen. Alles zur Bedienung unter <button class="link-btn" data-act="help">Hilfe</button>.</span></p>`;
+    return h;
+  }
+
+  function multiProps(objs) {
+    const counts = {};
+    for (const o of objs) counts[T[o.type].short] = (counts[T[o.type].short] || 0) + 1;
+    const locked = objs.filter((o) => o.locked).length;
+    return `<h2 class="sec-title"><span>${objs.length} Objekte ausgewählt<small>${Object.entries(counts).map(([k, v]) => `${v} × ${esc(k)}`).join(', ')}${locked ? ` · ${locked} gesperrt` : ''}</small></span></h2>
+      <p class="desc">Drehen, Duplizieren, Sperren und Löschen über die Leiste unten im Plan.</p>
+      <div class="btn-row"><button class="btn outline small" data-act="rot90">${icon('i-rot-cw')}90° drehen</button><button class="btn outline small" data-act="none">Auswahl aufheben</button></div>`;
+  }
+
+  function objectProps(o) {
     const d = T[o.type];
-    let h = `<h2 class="sec-title">${thumb(o)}<span>${esc(d.name)}</span></h2><p class="desc">${esc(d.desc || '')}</p>`;
+    let h = `<h2 class="sec-title">${thumb(o)}<span>${esc(d.name)}<small>${esc(d.desc || '')}</small></span></h2>`;
+    // Name / Beschriftung
     if (o.type === 'label') {
       h += `<div class="field-grid two"><label class="field">Text<input type="text" data-k="text" value="${esc(o.text || '')}" maxlength="60"></label>
         <label class="field">Schriftgröße (cm)<input type="number" data-k="size" value="${o.size || 22}" min="6" max="120" step="1"></label></div>`;
     } else if (d.kind === 'zone') {
       h += `<label class="field">Name der Zone<input type="text" data-k="label" value="${esc(o.label || '')}" maxlength="40" placeholder="z. B. Ruhezone" list="zone-names"></label>
         <datalist id="zone-names">${ZONE_NAMES.map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist>
-        <p class="desc">Fläche: <strong data-zone-area>${LLR.zoneArea(o)}</strong></p>`;
+        <p class="desc" style="margin-top:6px">Fläche: <strong data-zone-area>${LLR.zoneArea(o)}</strong></p>`;
+    } else if (A.isSeat(o) && LLR.classUI) {
+      h += LLR.classUI.seatField(o);
+      h += `<label class="field">Beschriftung (optional)<input type="text" data-k="label" value="${esc(o.label || '')}" maxlength="40" placeholder="z. B. Platz 1"></label>`;
     } else {
-      h += `<label class="field">Beschriftung ${d.kind === 'seat' ? '(z. B. Name)' : '(optional)'}<input type="text" data-k="label" value="${esc(o.label || '')}" maxlength="40" placeholder="${d.kind === 'seat' ? 'z. B. Name' : 'z. B. Gruppe A'}"></label>`;
+      h += `<label class="field">Beschriftung (optional)<input type="text" data-k="label" value="${esc(o.label || '')}" maxlength="40" placeholder="z. B. Gruppe A"></label>`;
     }
-    h += `<div class="sub-title">Position</div><div class="field-grid">
-      <label class="field">X (cm)<input type="number" data-k="x" value="${Math.round(o.x)}" step="1" ${o.locked ? 'disabled' : ''}></label>
-      <label class="field">Y (cm)<input type="number" data-k="y" value="${Math.round(o.y)}" step="1" ${o.locked ? 'disabled' : ''}></label>
-      <label class="field">Drehung (°)<input type="number" data-k="rot" value="${Math.round(o.rot || 0)}" step="15" ${o.locked || d.wall ? 'disabled' : ''}></label></div>`;
+    // Größe
     if (d.resizable) {
       const ms = d.minSize || { w: 5, d: 5 };
-      if (d.round) {
-        h += `<div class="sub-title">Größe</div><div class="field-grid"><label class="field">Durchmesser (cm)<input type="number" data-k="diam" value="${Math.round(o.w)}" min="${ms.w}" max="1000" step="5" ${o.locked ? 'disabled' : ''}></label></div>`;
-      } else {
-        h += `<div class="sub-title">Größe</div><div class="field-grid two"><label class="field">Breite (cm)<input type="number" data-k="w" value="${Math.round(o.w)}" min="${ms.w}" max="2000" step="5" ${o.locked ? 'disabled' : ''}></label>`;
+      h += `<div class="sub-title">Größe</div>`;
+      if (d.round) h += `<div class="field-grid"><label class="field">Durchmesser (cm)<input type="number" data-k="diam" value="${Math.round(o.w)}" min="${ms.w}" max="1000" step="5" ${o.locked ? 'disabled' : ''}></label></div>`;
+      else {
+        h += `<div class="field-grid two"><label class="field">Breite (cm)<input type="number" data-k="w" value="${Math.round(o.w)}" min="${ms.w}" max="2000" step="5" ${o.locked ? 'disabled' : ''}></label>`;
         if (!d.widthOnly) h += `<label class="field">Tiefe (cm)<input type="number" data-k="d" value="${Math.round(o.d)}" min="${ms.d}" max="2000" step="5" ${o.locked ? 'disabled' : ''}></label>`;
         h += `</div>`;
       }
@@ -339,72 +432,75 @@
       h += `<div class="sub-title">Optionen</div>`;
       for (const op of d.options) h += `<label class="toggle"><input type="checkbox" data-opt="${op.key}" ${o[op.key] ? 'checked' : ''}> ${esc(op.label)}</label>`;
     }
-    h += `<label class="toggle"><input type="checkbox" data-opt="locked" ${o.locked ? 'checked' : ''}><span>Gesperrt<small>gegen versehentliches Verschieben</small></span></label>`;
-    h += `<div class="btn-row">`;
-    if (!d.wall) h += `<button class="btn outline small" data-act="rotl" ${o.locked ? 'disabled' : ''}>${icon('i-rot-ccw')}−15°</button><button class="btn outline small" data-act="rotr" ${o.locked ? 'disabled' : ''}>${icon('i-rot-cw')}+15°</button><button class="btn outline small" data-act="rot90" ${o.locked ? 'disabled' : ''}>${icon('i-rot-cw')}90°</button>`;
-    h += `<button class="btn outline small" data-act="dup">${icon('i-copy')}Duplizieren</button><button class="btn outline small" data-act="del" style="color:var(--bad)" ${o.locked ? 'disabled' : ''}>${icon('i-trash')}Löschen</button></div>`;
-    if (A.isTable(o)) h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Ganze Tischgruppe mit Stühlen auswählen</button></div><p class="desc" style="margin-top:6px">Tipp: Doppelklick auf einen Tisch wählt die Gruppe ebenfalls aus.</p>`;
-    if (o.type === 'partition') h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Alle verbundenen Trennwände auswählen</button></div><p class="desc" style="margin-top:6px">Trennwände rasten an den Enden aneinander ein (gerade, im 45°/90°-Winkel oder als T). Doppelklick wählt die ganze Wand.</p>`;
-    if (A.isTable(o) || o.type === 'wheelchair') h += accessInfo(o);
-    if (A.isSeat(o)) h += seatSight(o);
+    if (A.isTable(o)) h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Ganze Tischgruppe mit Stühlen auswählen</button></div>`;
+    if (o.type === 'partition') h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Alle verbundenen Trennwände auswählen</button></div>`;
+    // Prüfungen für dieses Objekt
+    const checks = objectChecks(o);
+    if (checks) h += `<div class="sub-title">Prüfen</div><div class="mini-checks">${checks}</div>`;
     const why = app.problems.get(o.id);
-    if (why) {
-      h += `<div class="check-row bad">${icon('i-alert')}<span class="txt">${why.has('out') ? 'Ragt aus dem Raum heraus. ' : ''}${why.has('overlap') ? 'Überschneidet sich mit einem anderen Objekt.' : ''}</span></div>`;
-    }
-    box.innerHTML = h;
+    if (why) h += row('bad', 'i-alert', `${why.has('out') ? 'Ragt aus dem Raum heraus. ' : ''}${why.has('overlap') ? 'Überschneidet sich mit einem anderen Objekt.' : ''}`);
+    // Position (selten gebraucht, daher eingeklappt)
+    h += `<details class="more" data-pos ${panels.pos ? 'open' : ''}><summary>Position &amp; Drehung</summary><div class="field-grid">
+      <label class="field">X (cm)<input type="number" data-k="x" value="${Math.round(o.x)}" step="1" ${o.locked ? 'disabled' : ''}></label>
+      <label class="field">Y (cm)<input type="number" data-k="y" value="${Math.round(o.y)}" step="1" ${o.locked ? 'disabled' : ''}></label>
+      <label class="field">Drehung (°)<input type="number" data-k="rot" value="${Math.round(o.rot || 0)}" step="15" ${o.locked || d.wall ? 'disabled' : ''}></label></div>
+      <label class="toggle"><input type="checkbox" data-opt="locked" ${o.locked ? 'checked' : ''}><span>Gesperrt<small>gegen versehentliches Verschieben</small></span></label></details>`;
+    return h;
   }
 
-  /* Rollstuhl: Weg von der Tür zu diesem Tisch bzw. Prüf-Rollstuhl */
-  function accessInfo(o) {
-    let h = `<div class="sub-title">Rollstuhl</div>`;
-    const a = app.access;
-    if (!a) {
-      return h + `<div class="btn-row"><button class="btn outline small block" data-act="accessOn">${icon('i-route')}Weg von der Tür prüfen</button></div>`;
+  /* Kurz-Prüfungen am ausgewählten Objekt; ein Klick zeigt die Prüfung im Plan */
+  function mini(lens, gl, title, txt, small) {
+    return `<button class="mini-row${app.overlay[lens] ? ' on' : ''}" data-mini="${lens}" title="${app.overlay[lens] ? 'Im Plan aktiv' : 'Im Plan zeigen'}">${gl}<span class="txt"><b>${title}</b>${txt}${small ? `<small>${small}</small>` : ''}</span></button>`;
+  }
+
+  function objectChecks(o) {
+    let h = '';
+    if (A.isTable(o) || o.type === 'wheelchair') h += accessMini(o);
+    if (!A.isSeat(o)) return h;
+    // Sicht
+    const cone = A.sightCone(app.doc, o.id);
+    if (cone && cone.views.length) {
+      const sum = { good: 'Direkter Blick', side: 'Kopf seitlich drehen', person: 'Person im Blickfeld', back: 'Kein Blick: abgewandt', none: 'Kein Blick: verdeckt' }[cone.cat];
+      const b = cone.best;
+      h += mini('sight', glyph(cone.cat), 'Sicht auf Tafel & Bildschirme', sum, b ? `beste Sicht: ${esc(b.s.name)}, ${m1(b.dist)}${cone.free ? '' : `, ${Math.round(b.ang)}°`}` : '');
+    } else h += mini('sight', glyph('none'), 'Sicht auf Tafel & Bildschirme', 'Keine Präsentationsfläche vor diesem Platz');
+    // Lehrkraft
+    const t = app.getTeacher();
+    const ts = t.seats.find((x) => x.id === o.id);
+    if (ts) {
+      const eye = { face: 'sieht das Gesicht', profile: 'sieht das Profil', back: 'sieht nur den Rücken', blocked: 'Sicht verdeckt' }[ts.eye.kind];
+      let walk = 'nicht erreichbar';
+      if (ts.reach) walk = `Weg ${m1(ts.walk)}${ts.reach.squeeze ? ' durch eine Engstelle' : ''}${ts.reach.across ? ', nur über den Tisch' : ''}`;
+      h += mini('teacher', tglyph(ts.cat), 'Lehrkraft', `${walk}`, `Lehrkraft ${eye}`);
     }
-    const row = (cls, ic, txt, small) => `<div class="check-row ${cls}">${icon(ic)}<span class="txt">${txt}${small ? `<small>${small}</small>` : ''}</span></div>`;
-    if (!a.hasDoor) return h + row('bad', 'i-alert', 'Keine Tür im Plan', 'Die Tür ist der Startpunkt der Wegprüfung.');
+    // Ruhe
+    const c = app.getCalm();
+    const cs = c.seats.find((x) => x.id === o.id);
+    if (cs) {
+      const label = { calm: 'Ruhiger Platz', mid: 'Mittlere Unruhe', busy: 'Unruhiger Platz' }[cs.cat];
+      const top = cs.factors.filter((x) => x.pts > 0).slice(0, 3).map((x) => x.label + (x.detail ? ` (${x.detail})` : '')).join(' · ');
+      const quiet = cs.factors.find((x) => x.key === 'quiet');
+      h += mini('calm', cglyph(cs.cat), 'Ruhe & Reize', `${label} · ${cs.score} von 100`, (top || 'keine Störquellen in der Nähe') + (quiet ? ' · in einer Ruhezone' : ''));
+    }
+    // Bedarfe der Person auf dem Platz
+    if (o.learner && LLR.classUI) h += LLR.classUI.seatChecks(o);
+    return h;
+  }
+
+  function accessMini(o) {
+    const a = app.access;
+    if (!a) return mini('access', sglyph(1, 'bang'), 'Rollstuhl', 'Antippen, um den Weg von der Tür zu prüfen');
+    if (!a.hasDoor) return mini('access', sglyph(2, 'x'), 'Rollstuhl', 'Keine Tür im Plan', 'Die Tür ist der Startpunkt der Wegprüfung.');
     if (o.type === 'wheelchair') {
       const w = a.wheelchairs.find((x) => x.id === o.id);
-      if (w && w.ok) h += row('ok', 'i-check', 'Von der Tür aus erreichbar', 'Grüne Linie im Plan: Weg mit mindestens ' + app.doc.settings.passage + ' cm Durchgang.');
-      else h += row('bad', 'i-alert', 'Kein Weg von der Tür', `Unterwegs ist es enger als ${app.doc.settings.passage} cm.`);
-      return h;
+      return w && w.ok ? mini('access', sglyph(0, 'check'), 'Rollstuhl', 'Von der Tür aus erreichbar', `Weg mit mindestens ${app.doc.settings.passage} cm Durchgang (grüne Linie).`) : mini('access', sglyph(2, 'x'), 'Rollstuhl', 'Kein Weg von der Tür', `Unterwegs ist es enger als ${app.doc.settings.passage} cm.`);
     }
     const t = a.tables.find((x) => x.id === o.id);
     if (!t) return '';
-    if (t.now) h += row('ok', 'i-check', 'Rollstuhlplatz von der Tür aus erreichbar', 'Blaue Linie im Plan: Weg von der Tür zum Platz.');
-    else if (t.later) h += row('warn', 'i-alert', `Erst nach Wegstellen ${t.moveMin > 1 ? 'von 2 Stühlen' : 'eines Stuhls'}`, 'Wegzustellende Stühle sind orange markiert, die orange Linie zeigt den Weg von der Tür.');
-    else if (!a.complete) h += row('', 'i-info', 'Wird geprüft …');
-    else h += row('bad', 'i-alert', 'Kein Rollstuhlplatz erreichbar', `Von der Tür führt kein Weg mit ${app.doc.settings.passage} cm Durchgang an diesen Tisch – auch nicht nach Wegstellen eines Stuhls.`);
-    if (!app.overlay.access) h += `<div class="btn-row"><button class="btn outline small block" data-act="accessOn">${icon('i-route')}Weg im Plan zeigen</button></div>`;
-    return h;
-  }
-
-  /* Sicht eines Sitzplatzes auf die Präsentationsflächen */
-  function seatSight(o) {
-    const cone = A.sightCone(app.doc, o.id);
-    let h = `<div class="sub-title">Sicht auf Tafel & Bildschirme</div>`;
-    if (!cone || !cone.views.length) {
-      h += `<p class="desc">Keine Präsentationsfläche vor diesem Platz (Tafel, Bildschirm oder Beamer-Fläche).</p>`;
-    } else {
-      const sum = { good: 'Direkter Blick', side: 'Eingeschränkt: Kopf seitlich drehen', person: 'Eingeschränkt: Person im Blickfeld', back: 'Kein Blick: abgewandt', none: 'Kein Blick: verdeckt' }[cone.cat];
-      h += `<p class="seat-sum">${glyph(cone.cat)}<span>${sum}</span></p><table class="stat-table">`;
-      for (const v of cone.views.slice().sort((a, b) => a.dist - b.dist)) {
-        const pill =
-          v.cat === 'hidden' ? '<span class="pill bad">verdeckt</span>'
-          : v.turn === 'back' ? '<span class="pill bad">abgewandt</span>'
-          : v.turn === 'side' ? '<span class="pill warn">seitlich</span>'
-          : v.person ? '<span class="pill warn">Person im Blick</span>'
-          : '<span class="pill ok">direkt</span>';
-        let info = app.fmtM(v.dist);
-        if (!cone.free) info += ` · ${Math.round(v.ang)}° zur Blickrichtung`;
-        if (v.frac < 0.999) info += ` · ${Math.round(v.frac * 100)} % sichtbar`;
-        if (v.cat !== 'hidden' && v.personFrac >= 0.03) info += ` · ca. ${Math.round(v.personFrac * 100)} % durch Personen verdeckt`;
-        h += `<tr><td>${esc(v.s.name)}${v === cone.best ? ' <span class="best" title="beste Sicht">★</span>' : ''}<small>${info}</small></td><td>${pill}</td></tr>`;
-      }
-      h += `</table>`;
-    }
-    h += `<div class="btn-row"><button class="btn outline small block" data-act="sight" aria-pressed="${app.overlay.sight}">${icon('i-eye')}${app.overlay.sight ? 'Sichtkegel ausblenden' : 'Sichtkegel im Plan zeigen'}</button></div>`;
-    return h;
+    if (t.now) return mini('access', sglyph(0, 'check'), 'Rollstuhl', 'Rollstuhlplatz von der Tür aus erreichbar', 'Blaue Linie im Plan: Weg von der Tür zum Platz.');
+    if (t.later) return mini('access', sglyph(1, 'bang'), 'Rollstuhl', `Erst nach Wegstellen ${t.moveMin > 1 ? 'von 2 Stühlen' : 'eines Stuhls'}`, 'Wegzustellende Stühle sind orange markiert.');
+    if (!a.complete) return mini('access', sglyph(1, 'bang'), 'Rollstuhl', 'Wird geprüft …');
+    return mini('access', sglyph(2, 'x'), 'Rollstuhl', 'Kein Rollstuhlplatz erreichbar', `Kein Weg mit ${app.doc.settings.passage} cm Durchgang an diesen Tisch.`);
   }
 
   function liveProps() {
@@ -457,6 +553,11 @@
       if (objs.length !== 1) return;
       const o = objs[0];
       const d = T[o.type];
+      if (t.hasAttribute('data-seat-learner')) {
+        t.blur();
+        app.assignLearner(o.id, t.value || null);
+        return;
+      }
       if (t.hasAttribute('data-k')) {
         const k = t.getAttribute('data-k');
         app.mutate(() => {
@@ -480,6 +581,7 @@
           }
           if (d.wall && (k === 'w' || k === 'diam')) app.snapToWall(o, { x: o.x, y: o.y });
         });
+        t.blur();
         renderProps();
       } else if (t.hasAttribute('data-opt')) {
         const k = t.getAttribute('data-opt');
@@ -493,8 +595,8 @@
     box.addEventListener(
       'toggle',
       (e) => {
-        if (!e.target.matches || !e.target.matches('[data-tips]')) return;
-        panels.tips = e.target.open;
+        if (!e.target.matches || !e.target.matches('[data-pos]')) return;
+        panels.pos = e.target.open;
         savePanels();
       },
       true
@@ -505,11 +607,17 @@
         const o = app.selectedObjects()[0];
         if (o) app.mutate(() => (o.color = sw.getAttribute('data-color')));
         renderProps();
+        return;
+      }
+      const m = e.target.closest('[data-mini]');
+      if (m) {
+        const k = m.getAttribute('data-mini');
+        setLens(app.overlay[k] ? null : k, { keepView: true });
       }
     });
   }
 
-  /* Aktionsknöpfe (Panel, Schnellleiste) */
+  /* Aktionsknöpfe (Panel, Schnellleiste, Menüs) */
   function doAct(act) {
     if (act === 'rotl') app.rotateSelected(-(app.doc.settings.angleSnap || 15));
     else if (act === 'rotr') app.rotateSelected(app.doc.settings.angleSnap || 15);
@@ -521,17 +629,14 @@
     else if (act === 'group') {
       const o = app.selectedObjects()[0];
       if (o) app.selectGroup(o.id);
-    }
-    else if (act === 'carry') {
+    } else if (act === 'carry') {
       const on = !app.doc.settings.carryChairs;
       app.setPref('carryChairs', on);
       toast(on ? 'Angestellte Stühle wandern jetzt mit dem Tisch mit.' : 'Stühle bleiben stehen, wenn ein Tisch bewegt wird.');
-    }
-    else if (act === 'sight') app.setOverlay('sight', !app.overlay.sight);
-    else if (act === 'settings') openSettings();
+    } else if (act === 'settings') openSettings();
     else if (act === 'details') showDetails();
     else if (act === 'wheelchair') addWheelchair();
-    else if (act === 'accessOn') app.setOverlay('access', true);
+    else if (act === 'addTeacher') addTeacher();
     else if (act === 'selWheel') {
       app.select(app.doc.objects.filter((o) => o.type === 'wheelchair').map((o) => o.id));
       if (mobile()) closeDrawers();
@@ -545,8 +650,13 @@
     else if (act === 'new') openNew();
     else if (act === 'plans') openPlans();
     else if (act === 'export') exportPNG();
-    else if (act === 'print') printPlan();
+    else if (act === 'print') printPlan('plan');
+    else if (act === 'printRebuild') printPlan('rebuild');
+    else if (act === 'printSeating') printPlan('seating');
     else if (act === 'share') openShare();
+    else if (act === 'openPhases') openLibTab('phases');
+    else if (act === 'openLearners') openLibTab('learners');
+    else if (LLR.classUI && LLR.classUI.act) LLR.classUI.act(act);
   }
 
   function addWheelchair() {
@@ -557,29 +667,40 @@
       at = G.add(door, G.mul(inward, 110));
     }
     app.addObject('wheelchair', at, door ? { rot: G.rotFacing(G.rot({ x: 0, y: -1 }, door.rot || 0)) } : {});
-    if (!app.overlay.access) app.setOverlay('access', true);
+    if (!app.overlay.access) setLens('access');
     toast('Test-Rollstuhl hinzugefügt – verschieben und drehen. Rot = eckt an, grüne Linie = Weg von der Tür.');
     if (mobile()) closeDrawers();
   }
 
-  /* ---------- Prüfen & Zählen ---------- */
-  /* Aufklappbarer Abschnitt; ovKey = Schalter für die Darstellung im Plan */
-  function accCard(key, ic, title, summary, body, ovKey) {
-    const open = !!panels[key];
-    const sw = ovKey
-      ? `<label class="acc-switch" title="Im Plan anzeigen"><span>Im Plan</span><input type="checkbox" class="switch" data-ov="${ovKey}" ${app.overlay[ovKey] ? 'checked' : ''} aria-label="${title}: im Plan anzeigen"></label>`
-      : '';
-    return `<section class="acc${open ? ' open' : ''}${ovKey && app.overlay[ovKey] ? ' on' : ''}" data-acc="${key}">
-      <div class="acc-head">
-        <button type="button" class="acc-btn" data-acc-toggle="${key}" aria-expanded="${open}" aria-controls="acc-${key}">
-          <svg class="chev" aria-hidden="true"><use href="#i-chevron"/></svg>${icon(ic)}<span class="acc-title">${title}${summary ? `<small>${summary}</small>` : ''}</span>
-        </button>${sw}
-      </div>
-      <div class="acc-body" id="acc-${key}"${open ? '' : ' hidden'}>${open ? body() : ''}</div>
-    </section>`;
+  /* Lehrkraft-Position an der angenommenen Stelle einfügen */
+  function addTeacher() {
+    const t = app.getTeacher();
+    const p = t.positions[0] || app.viewCenterInRoom();
+    const s = A.surfaces(app.doc)[0];
+    app.addObject('teacher', { x: p.x, y: p.y }, s ? { rot: G.rotFacing(s.n) } : {});
+    toast('Lehrkraft-Position eingefügt – verschieben, um andere Standorte zu prüfen.');
   }
 
-  const row = (cls, ic, txt, small) => `<div class="check-row ${cls}">${icon(ic)}<span class="txt">${txt}${small ? `<small>${small}</small>` : ''}</span></div>`;
+  /* ---------- Prüfansicht wählen ---------- */
+  function setLens(key, opts) {
+    app.setLens(key);
+    if (key && !(opts && opts.keepView)) {
+      panels.view = 'checks';
+      savePanels();
+      if (!app.sel.size) showRightView('checks');
+    }
+  }
+
+  /* ---------- Prüfen (rechts) ---------- */
+  function lensCard(key, ic, title, summary, level, body) {
+    const on = !!app.overlay[key];
+    return `<section class="lens-card${on ? ' on' : ''}" data-card="${key}">
+      <button type="button" class="lens-head" data-lens-toggle="${key}" aria-expanded="${on}" title="${on ? 'Im Plan ausblenden' : 'Im Plan zeigen'}">
+        <span class="lens-ic">${icon(ic)}</span><span class="lens-title">${title}<small>${summary}</small></span>${on ? '<span class="lens-state">im Plan</span>' : dot(level)}
+      </button>
+      ${on ? `<div class="lens-body">${body()}</div>` : ''}
+    </section>`;
+  }
 
   function accessBody() {
     const a = app.access;
@@ -596,23 +717,21 @@
       h += row(a.turnPossible ? 'ok' : 'bad', a.turnPossible ? 'i-check' : 'i-alert', a.turnPossible ? `Wenden (Ø ${S.turning} cm) möglich – dunkelgrüne Flächen` : `Nirgends Platz zum Wenden (Ø ${S.turning} cm)`);
       const now = a.tablesNow;
       const later = a.tablesLater;
-      const cls = now ? 'ok' : later ? 'warn' : 'bad';
       let txt = `Tische mit Rollstuhlplatz: ${now} sofort erreichbar`;
       if (!a.complete) txt += ', weitere werden geprüft …';
       else if (later) txt += `, ${later} weitere nach Wegstellen ${a.laterMove > 1 ? 'von 1–2 Stühlen' : 'eines Stuhls'}`;
-      h += row(cls, now ? 'i-check' : 'i-alert', txt, 'Der Weg von der Tür ist jeweils geprüft. Tisch antippen: Der Weg und ggf. der wegzustellende Stuhl werden im Plan gezeigt.');
+      h += row(now ? 'ok' : later ? 'warn' : 'bad', now ? 'i-check' : 'i-alert', txt, 'Tisch antippen: Weg und ggf. wegzustellender Stuhl erscheinen im Plan.');
     }
-    // Test-Rollstuhl: eigener Block, klar als Hinzufügen gekennzeichnet
     const chairs = app.doc.objects.filter((o) => o.type === 'wheelchair');
     h += `<div class="sub-block"><div class="sub-head">${icon('i-wheelchair')}Test-Rollstuhl</div>
       <p class="desc">Ein Rollstuhl (70 × 120 cm) mit Wendekreis zum Ausprobieren. Er wird rot, wenn er aneckt; die grüne Linie zeigt den Weg von der Tür.</p>`;
     if (chairs.length) {
       const ok = a.wheelchairs.filter((w) => w.ok).length;
-      h += `<p class="desc"><strong>${chairs.length === 1 ? '1 Test-Rollstuhl' : chairs.length + ' Test-Rollstühle'}</strong> im Plan · ${ok === chairs.length ? 'alle' : ok} von der Tür erreichbar</p>
-        <div class="btn-row"><button class="btn outline small" data-act="selWheel">Auswählen</button><button class="btn outline small" data-act="delWheel" style="color:var(--bad)">${icon('i-trash')}Entfernen</button></div>`;
+      h += `<p class="desc"><strong>${chairs.length === 1 ? '1 Test-Rollstuhl' : chairs.length + ' Test-Rollstühle'}</strong> · ${ok === chairs.length ? 'alle' : ok} von der Tür erreichbar</p>
+        <div class="btn-row"><button class="btn outline small" data-act="selWheel">Auswählen</button><button class="btn outline small text-danger" data-act="delWheel">${icon('i-trash')}Entfernen</button></div>`;
     }
     h += `<div class="btn-row"><button class="btn outline small block" data-act="wheelchair">${icon('i-plus')}Test-Rollstuhl hinzufügen</button></div></div>`;
-    h += `<p class="callout">Vereinfachtes Modell in Anlehnung an DIN 18040-1 (Durchgang ≥ ${S.passage} cm, Bewegungsfläche Ø ${S.turning} cm). Ersetzt keine fachliche Prüfung vor Ort. Durchgangsbreiten am ausgewählten Objekt zeigt „Abstände“ unter „Ansicht im Plan“.</p>`;
+    h += `<p class="callout">Vereinfachtes Modell in Anlehnung an DIN 18040-1 (Durchgang ≥ ${S.passage} cm, Bewegungsfläche Ø ${S.turning} cm). Ersetzt keine fachliche Prüfung vor Ort.</p>`;
     return h;
   }
 
@@ -626,105 +745,103 @@
       ${s.persons ? `<tr class="sub"><td>${glyph('person')} Person im Blickfeld</td><td>${s.person}</td></tr>` : ''}
       <tr><td>${glyph('back')} Kein Blick (abgewandt / verdeckt)</td><td>${s.back}</td></tr></table>`;
     const H = A.HEIGHTS;
-    h += `<label class="toggle"><input type="checkbox" data-pref="sightPersons" ${s.persons ? 'checked' : ''}><span>Sitzende Personen im Blickfeld berücksichtigen<small>Ein Kopf (ca. ${2 * A.PERSON_R} cm breit) verdeckt je nach Abstand den unteren Teil der Fläche (Augenhöhe sitzend ${app.fmtM(H.eye)}, Fläche ${app.fmtM(H.low)}–${app.fmtM(H.top)}). Ab ${Math.round(A.PERSON_LIMIT * 100)} % verdeckter Fläche gilt die Sicht als eingeschränkt.</small></span></label>`;
-    h += `<p class="callout">Berücksichtigt werden alle Präsentationsflächen im Plan (${s.surfaces.map((x) => esc(x.name)).join(', ') || '–'}). Regale und Trennwände verdecken die Sicht. <strong>Sitzplatz antippen</strong> zeigt seinen Sichtkegel und wer im Blickfeld sitzt. Die Handreichung empfiehlt, alle drei Flächen zu nutzen.</p>`;
+    h += `<label class="toggle"><input type="checkbox" data-pref="sightPersons" ${s.persons ? 'checked' : ''}><span>Sitzende Personen im Blickfeld berücksichtigen<small>Ein Kopf (ca. ${2 * A.PERSON_R} cm breit) verdeckt je nach Abstand den unteren Teil der Fläche (Augenhöhe ${app.fmtM(H.eye)}, Fläche ${app.fmtM(H.low)}–${app.fmtM(H.top)}). Ab ${Math.round(A.PERSON_LIMIT * 100)} % gilt die Sicht als eingeschränkt.</small></span></label>`;
+    h += `<p class="callout">Berücksichtigt: ${s.surfaces.map((x) => esc(x.name)).join(', ') || '–'}. Regale und Trennwände verdecken. <strong>Sitzplatz antippen</strong> zeigt den Sichtkegel. Die Handreichung empfiehlt, alle drei Flächen zu nutzen.</p>`;
+    return h;
+  }
+
+  function teacherBody(t) {
+    let h = `<table class="stat-table">
+      <tr class="grp"><td colspan="2">Laufwege (Durchgang ≥ ${app.doc.settings.walk || 50} cm)</td></tr>
+      <tr class="sub"><td>Plätze erreichbar</td><td>${t.reachable} / ${t.seats.length}</td></tr>
+      ${t.tight ? `<tr class="sub"><td>davon nur durch Engstellen</td><td>${t.tight}</td></tr>` : ''}
+      ${t.across ? `<tr class="sub"><td>davon nur über den Tisch</td><td>${t.across}</td></tr>` : ''}
+      <tr class="sub"><td>Weg im Schnitt / längster</td><td>${m1(t.avgWalk)} / ${m1(t.maxWalk)}</td></tr>
+      <tr class="grp"><td colspan="2">Blickkontakt: Die Lehrkraft sieht …</td></tr>
+      <tr class="sub"><td>${tglyph('good')} das Gesicht</td><td>${t.face}</td></tr>
+      <tr class="sub"><td>${tglyph('side')} nur das Profil</td><td>${t.profile}</td></tr>
+      <tr class="sub"><td>${tglyph('back')} nur den Rücken</td><td>${t.back}</td></tr>
+      ${t.hidden ? `<tr class="sub"><td>${tglyph('none')} nichts (verdeckt)</td><td>${t.hidden}</td></tr>` : ''}</table>`;
+    if (t.implicit) h += `<div class="sub-block"><div class="sub-head">${icon('i-teacher')}Standort der Lehrkraft</div><p class="desc">Angenommen: vor der Tafel. Für andere Standorte (z. B. Raummitte, Lehrertisch, Doppelbesetzung) eine Lehrkraft-Position einfügen und verschieben.</p><div class="btn-row"><button class="btn outline small block" data-act="addTeacher">${icon('i-plus')}Lehrkraft-Position einfügen</button></div></div>`;
+    else h += `<p class="desc" style="margin-top:8px">${t.positions.length === 1 ? '1 Lehrkraft-Position' : t.positions.length + ' Lehrkraft-Positionen'} im Plan – je Platz zählt die nächste.</p>`;
+    if (t.stuck) h += row('bad', 'i-alert', 'Eine Lehrkraft-Position steht in einem Möbelstück', 'Etwas in den freien Raum schieben.');
+    h += `<p class="callout">Erreichbar heißt: Die Lehrkraft kann neben dem Platz stehen, um zu helfen. Stühle zählen mit ihrer Sitzfläche (man kann sie etwas heranrücken). <strong>Sitzplatz antippen</strong> zeigt den Weg.</p>`;
+    return h;
+  }
+
+  function calmBody(c) {
+    let h = `<table class="stat-table">
+      <tr><td>${cglyph('calm')} Ruhige Plätze</td><td>${c.calm}</td></tr>
+      <tr><td>${cglyph('mid')} Mittlere Unruhe</td><td>${c.mid}</td></tr>
+      <tr><td>${cglyph('busy')} Unruhige Plätze</td><td>${c.busy}</td></tr></table>`;
+    if (c.glareSeats) h += row('warn', 'i-alert', `${c.glareSeats} Plätze sehen ein Fenster gespiegelt`, 'Auf Tafel oder Bildschirm kann sich das Fenster spiegeln – Lamellenvorhang schließen hilft.');
+    if (!c.hasDoor) h += row('warn', 'i-info', 'Keine Tür im Plan', 'Ohne Tür fehlen Laufwege und Türnähe in der Bewertung.');
+    h += `<p class="callout">Bewertet werden: Nähe zur Tür (bis 30 Punkte) und zur Lounge (20), Laufwege anderer am Platz vorbei (25), viele Nachbarplätze (15), Blick aus dem Fenster (10) und Spiegelungen (10). Regale und Trennwände dämpfen Tür und Lounge; Plätze in einer Zone „Ruhezone“ oder „Rückzug“ gelten als ruhiger. <strong>Sitzplatz antippen</strong> zeigt die Gründe.</p>`;
     return h;
   }
 
   function renderChecks() {
     const box = $('#checks');
-    const st = app.stats();
-    const c = st.count;
+    if (box.hidden && !mobile()) {
+      updateChecksBadge();
+      return;
+    }
     const S = app.doc.settings;
-    const statRow = (label, n, inv) => {
-      if (inv !== undefined) {
-        const cls = n > inv ? 'warn' : n === inv ? 'ok' : '';
-        return `<tr><td>${label}</td><td><span class="pill ${cls}">${n} / ${inv}</span></td></tr>`;
-      }
-      return `<tr><td>${label}</td><td>${n}</td></tr>`;
-    };
-    let h = `<h2 class="sec-title">Prüfen & Zählen</h2>`;
-
-    h += `<div class="grp-title">Barrierefreiheit & Inklusion</div>`;
+    let h = `<p class="checks-intro">Eine Prüfung antippen zeigt sie im Plan – immer eine zur Zeit. Die Werkzeugleiste oben im Plan schaltet dieselben Ansichten.</p>`;
+    // Rollstuhl
     const a = app.access;
     let accSum = `Durchgang ${S.passage} cm · Wenden Ø ${S.turning} cm`;
-    if (a && !a.hasDoor) accSum = 'Keine Tür im Plan';
-    else if (a && !a.doorOk) accSum = 'Tür nicht befahrbar';
-    else if (a) accSum = `Tür ✓ · ${a.tablesNow} ${a.tablesNow === 1 ? 'Tisch' : 'Tische'} mit Rollstuhlplatz${a.complete && a.tablesLater ? ` (+${a.tablesLater})` : ''}`;
-    h += accCard('access', 'i-wheelchair', 'Rollstuhl-Check', accSum, accessBody, 'access');
-
+    let accLv = -1;
+    if (a && !a.hasDoor) (accSum = 'Keine Tür im Plan'), (accLv = 2);
+    else if (a && !a.doorOk) (accSum = 'Tür nicht befahrbar'), (accLv = 2);
+    else if (a) {
+      accSum = `${a.tablesNow} ${a.tablesNow === 1 ? 'Tisch' : 'Tische'} mit Rollstuhlplatz${a.complete && a.tablesLater ? ` (+${a.tablesLater} nach Stuhl wegstellen)` : ''}${a.turnPossible ? '' : ' · kein Wenden'}`;
+      accLv = !a.turnPossible || (!a.tablesNow && !a.tablesLater) ? 2 : a.tablesNow ? 0 : 1;
+    }
+    h += lensCard('access', 'i-wheelchair', 'Rollstuhl-Check', accSum, accLv, accessBody);
+    // Sicht
     const s = app.getSight();
     let sightSum = `${s.good} direkt · ${s.limited} eingeschränkt · ${s.back} ohne Blick`;
-    if (!s.seats.length) sightSum = 'Keine Sitzplätze im Plan';
-    else if (!s.surfaces.length) sightSum = 'Keine Präsentationsfläche im Plan';
-    h += accCard('sight', 'i-eye', 'Sicht auf Tafel & Bildschirme', sightSum, () => sightBody(s), 'sight');
-
-    h += `<div class="grp-title">Raum & Belegung</div>`;
-    const seatsCls = st.seats > 24 ? 'warn' : 'ok';
-    h += accCard('seats', 'i-list', 'Belegung', `${st.seats} Arbeitsplätze${st.lounge ? ` · ${st.lounge} Lounge` : ''}${st.seats > 24 ? ' · mehr als empfohlen' : ''}`, () => {
-      let b = `<table class="stat-table">`;
-      b += statRow('Dreieckstische', c.table || 0, 12);
-      if (c.tableRect) b += statRow('Rechtecktische', c.tableRect);
-      b += statRow('Stühle', c.chair || 0, 19);
-      b += statRow('Hocker', c.stool || 0, 2);
-      if (st.wheelchairs) b += statRow('Rollstuhlplätze (Test-Rollstühle)', st.wheelchairs);
-      b += `<tr class="total"><td>Arbeitsplätze gesamt</td><td><span class="pill ${seatsCls}">${st.seats}</span></td></tr>`;
-      b += statRow('Lounge (Sofa, Sitzsäcke)', st.lounge);
-      b += `</table>`;
-      if (st.seats > 24) b += row('warn', 'i-alert', 'Mehr als 24 Arbeitsplätze', 'Die Handreichung empfiehlt maximal 24 Sitzplätze im LLR.');
-      if ((c.chair || 0) > 19) b += row('warn', 'i-info', `${c.chair - 19} Stuhl/Stühle mehr als im LLR vorhanden`, 'Zusätzliche Stühle aus anderen Räumen holen.');
-      return b;
-    });
-
-    const zones = app.doc.objects.filter((o) => T[o.type].kind === 'zone');
-    if (zones.length) {
-      h += accCard('zones', 'i-grid', 'Zonen', zones.length === 1 ? '1 Zone' : `${zones.length} Zonen`, () => {
-        let b = `<table class="stat-table">`;
-        for (const z of zones) {
-          const col = (T[z.type].colors[z.color] || T[z.type].colors[T[z.type].defaultColor]).fill;
-          b += `<tr><td><span class="zone-dot" style="background:${col}"></span>${esc(z.label || 'Zone')}</td><td>${LLR.zoneArea(z)}</td></tr>`;
-        }
-        return b + `</table>`;
-      });
-    }
-
+    let sightLv = s.back ? 2 : s.limited ? 1 : 0;
+    if (!s.seats.length) (sightSum = 'Keine Sitzplätze im Plan'), (sightLv = -1);
+    else if (!s.surfaces.length) (sightSum = 'Keine Präsentationsfläche im Plan'), (sightLv = 2);
+    h += lensCard('sight', 'i-eye', 'Sicht auf Tafel & Bildschirme', sightSum, sightLv, () => sightBody(s));
+    // Lehrkraft
+    const t = app.getTeacher();
+    const tLv = t.reachable < t.seats.length || t.hidden ? 2 : t.back || t.tight || t.across ? 1 : 0;
+    h += lensCard('teacher', 'i-teacher', 'Lehrkraft: Wege & Blickkontakt', t.seats.length ? `${t.reachable}/${t.seats.length} erreichbar · ${t.face} Gesichter im Blick` : 'Keine Sitzplätze im Plan', t.seats.length ? tLv : -1, () => teacherBody(t));
+    // Ruhe
+    const c = app.getCalm();
+    h += lensCard('calm', 'i-leaf', 'Ruhe & Reize', c.seats.length ? `${c.calm} ruhig · ${c.mid} mittel · ${c.busy} unruhig` : 'Keine Sitzplätze im Plan', c.seats.length ? (c.busy ? 2 : c.calm ? 0 : 1) : -1, () => calmBody(c));
+    // Sitzplan & Umbau (js/ui-class.js)
+    if (LLR.classUI) h += LLR.classUI.checkCards(lensCard);
+    // Überschneidungen
     const probs = app.problems.size;
     if (probs) h += `<div class="check-row bad">${icon('i-alert')}<span class="txt">${probs} Objekt(e) überschneiden sich oder ragen aus dem Raum<br><button class="btn outline small" data-act="showProblems">Markieren</button></span></div>`;
     else h += `<div class="check-row ok">${icon('i-check')}<span class="txt">Keine Überschneidungen</span></div>`;
-
-    h += `<div class="grp-title">Ansicht im Plan</div>`;
-    const vw = (key, ic, label, small) =>
-      `<label class="switch-row compact">${icon(ic)}<span class="lbl">${label}<small>${small}</small></span><input type="checkbox" class="switch" data-ov="${key}" ${app.overlay[key] ? 'checked' : ''} aria-label="${label}"></label>`;
-    h += vw('dims', 'i-dims', 'Abstände zum Nachbarn', `Am ausgewählten Objekt · grün ≥ ${S.passage} cm`);
-    h += vw('roomDims', 'i-roomdims', 'Raummaße', 'Breite, Länge und Fläche am Rand');
-    h += vw('grid', 'i-grid', 'Raster', `Rastergröße ${S.grid || 50} cm`);
     rerender(box, h);
+    updateChecksBadge();
   }
 
-  function setAccOpen(key, open) {
-    panels[key] = open;
-    savePanels();
-    if (key === 'access') app.setNeed('access', open);
+  function updateChecksBadge() {
+    const b = $('#checks-badge');
+    const n = app.problems.size;
+    b.hidden = !n;
+    b.textContent = n ? String(n) : '';
+    b.title = n ? `${n} Überschneidung(en)` : '';
   }
 
   function bindChecks() {
     const box = $('#checks');
     box.addEventListener('change', (e) => {
-      const k = e.target.getAttribute('data-ov');
-      if (k) {
-        if (e.target.checked && (k === 'access' || k === 'sight')) setAccOpen(k, true);
-        app.setOverlay(k, e.target.checked);
-        return;
-      }
       const pref = e.target.getAttribute('data-pref');
       if (pref) app.setPref(pref, e.target.checked);
     });
     box.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-acc-toggle]');
+      const b = e.target.closest('[data-lens-toggle]');
       if (!b) return;
-      const key = b.getAttribute('data-acc-toggle');
-      setAccOpen(key, !panels[key]);
-      renderChecks();
+      const key = b.getAttribute('data-lens-toggle');
+      setLens(app.overlay[key] ? null : key);
     });
   }
 
@@ -732,22 +849,22 @@
   function renderLegend() {
     const lg = $('#legend');
     let h = '';
-    if (app.overlay.access) {
+    const lens = app.lens();
+    const sw = (style, txt, cls) => `<div class="row"><span class="sw ${cls || ''}" style="${style}"></span><span>${txt}</span></div>`;
+    const gl = (g, txt) => `<div class="row">${g}<span>${txt}</span></div>`;
+    if (lens === 'access') {
       const S = app.doc.settings;
-      h += `<strong>Rollstuhl</strong>
-        <div class="row"><span class="sw" style="background:rgba(116,205,132,.55)"></span><span>befahrbar (≥ ${S.passage} cm)</span></div>
-        <div class="row"><span class="sw" style="background:rgba(47,158,68,.75)"></span><span>Wenden möglich (Ø ${S.turning} cm)</span></div>
-        <div class="row"><span class="sw" style="background:rgba(224,49,49,.55)"></span><span>frei, aber zu eng / nicht erreichbar</span></div>
-        <div class="row"><span class="sw round" style="background:#1F6FEB"></span><span>Rollstuhlplatz am Tisch (gestrichelt: erst Stuhl wegstellen)</span></div>
-        <div class="row"><span class="sw line" style="color:#1F6FEB"></span><span>Weg von der Tür (Tisch antippen)</span></div>`;
-    }
-    if (app.overlay.sight) {
-      h += `<strong>Sicht</strong>
-        <div class="row">${glyph('good')}<span>direkter Blick</span></div>
-        <div class="row">${glyph('side')}<span>eingeschränkt: Kopf seitlich drehen</span></div>
-        ${app.doc.settings.sightPersons !== false ? `<div class="row">${glyph('person')}<span>eingeschränkt: Person im Blickfeld</span></div>` : ''}
-        <div class="row">${glyph('back')}<span>kein Blick: abgewandt / verdeckt</span></div>
-        <div class="row"><span class="sw cone"></span><span>${app.selectedObjects().some(A.isSeat) ? 'Sichtkegel (rot = verdeckt, orange = Person)' : 'Sitzplatz antippen: Sichtkegel'}</span></div>`;
+      h += `<strong>Rollstuhl</strong>` + sw('background:rgba(116,205,132,.55)', `befahrbar (≥ ${S.passage} cm)`) + sw('background:rgba(47,158,68,.75)', `Wenden möglich (Ø ${S.turning} cm)`) + sw('background:rgba(224,49,49,.55)', 'frei, aber zu eng / nicht erreichbar') + sw('background:#1F6FEB', 'Rollstuhlplatz am Tisch (gestrichelt: erst Stuhl wegstellen)', 'round') + sw('color:#1F6FEB', 'Weg von der Tür (Tisch antippen)', 'line');
+    } else if (lens === 'sight') {
+      h += `<strong>Sicht</strong>` + gl(glyph('good'), 'direkter Blick') + gl(glyph('side'), 'eingeschränkt: Kopf seitlich drehen') + (app.doc.settings.sightPersons !== false ? gl(glyph('person'), 'eingeschränkt: Person im Blickfeld') : '') + gl(glyph('back'), 'kein Blick: abgewandt / verdeckt') + sw('', app.selectedObjects().some(A.isSeat) ? 'Sichtkegel (rot = verdeckt, orange = Person)' : 'Sitzplatz antippen: Sichtkegel', 'cone');
+    } else if (lens === 'teacher') {
+      h += `<strong>Lehrkraft</strong>` + gl(tglyph('good'), 'Gesicht im Blick, bequem erreichbar') + gl(tglyph('side'), 'nur Profil, Engstelle, weit oder über den Tisch') + gl(tglyph('back'), 'sitzt mit dem Rücken zur Lehrkraft') + gl(tglyph('none'), 'nicht erreichbar oder verdeckt') + sw('background:rgba(12,133,153,.35)', 'Reichweite (dunkler = näher)') + sw('color:#0C8599', 'Weg zum ausgewählten Platz', 'line');
+    } else if (lens === 'calm') {
+      h += `<strong>Ruhe & Reize</strong>` + gl(cglyph('calm'), 'ruhiger Platz') + gl(cglyph('mid'), 'mittlere Unruhe') + gl(cglyph('busy'), 'unruhiger Platz') + sw('background:radial-gradient(rgba(232,89,12,.45),rgba(232,89,12,0))', 'Störquelle: Tür, Lounge', 'round') + sw('background:rgba(232,89,12,.3)', 'Laufwege (kräftiger = mehr Verkehr)');
+    } else if (lens === 'seating') {
+      h += `<strong>Sitzplan</strong>` + gl(sglyph(0, 'check'), 'Bedarfe erfüllt') + gl(sglyph(1, 'bang'), 'teilweise erfüllt') + gl(sglyph(2, 'x'), 'Bedarf nicht erfüllt') + sw('color:#2F9E44', 'möchte nebeneinander sitzen', 'line') + sw('color:#E03131', 'soll nicht nebeneinander sitzen', 'line');
+    } else if (lens === 'rebuild') {
+      h += `<strong>Umbau</strong>` + sw('background:rgba(95,61,196,.15);border:1.5px dashed #5F3DC4', 'Position in der vorigen Phase') + sw('color:#5F3DC4', 'Weg (Nummer = Reihenfolge)', 'line') + gl(sglyph(0, 'check').replace(/<path[^>]*\/>/, '<path d="M-4 0h8M0 -4v8" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>'), 'neu hinzustellen') + gl(sglyph(2, 'x'), 'wegräumen');
     }
     lg.hidden = !h;
     if (!h) {
@@ -773,10 +890,19 @@
   function syncTools() {
     for (const b of $$('.tool[data-mode]')) b.setAttribute('aria-pressed', String(app.mode === b.getAttribute('data-mode') && !(app.multi && app.mode === 'select' && b.getAttribute('data-mode') === 'select')));
     $('#tool-multi').setAttribute('aria-pressed', String(app.multi));
-    for (const b of $$('.tool[data-overlay]')) b.setAttribute('aria-pressed', String(!!app.overlay[b.getAttribute('data-overlay')]));
-    syncSnapPop();
+    for (const b of $$('.tool[data-lens]')) b.setAttribute('aria-pressed', String(!!app.overlay[b.getAttribute('data-lens')]));
+    syncViewPop();
+    syncHint();
+  }
+
+  let hintLock = false;
+  function syncHint() {
+    if (hintLock) return;
     const hint = $('#stage-hint');
-    if (app.mode === 'measure') {
+    if (app.placing) {
+      hint.innerHTML = `<span>Platz für <strong>${esc(app.learnerName(app.placing))}</strong> antippen</span><button class="x" data-hint="cancel">Abbrechen</button>`;
+      hint.hidden = false;
+    } else if (app.mode === 'measure') {
       hint.textContent = app.measure ? `Gemessen: ${Math.round(G.dist(app.measure.a, app.measure.b))} cm – neue Linie ziehen oder Esc` : 'Linie ziehen zum Messen · rastet an Kanten ein (Alt = frei, Umschalt = 45°)';
       hint.hidden = false;
     } else if (app.multi) {
@@ -785,49 +911,68 @@
     } else hint.hidden = true;
   }
 
-  /* Einrasten & Raster (Magnet-Knopf) */
-  function syncSnapPop() {
+  /* Ansicht & Einrasten */
+  function syncViewPop() {
     const s = app.doc.settings;
-    const pop = $('#snap-pop');
+    const pop = $('#view-pop');
     for (const i of $$('[data-pref]', pop)) i.checked = !!s[i.getAttribute('data-pref')];
+    for (const i of $$('[data-ov]', pop)) i.checked = !!app.overlay[i.getAttribute('data-ov')];
     for (const b of $$('[data-grid]', pop)) b.setAttribute('aria-pressed', String(Number(b.getAttribute('data-grid')) === (s.grid || 50)));
-    $('#tool-snap').setAttribute('aria-expanded', String(!pop.hidden));
+    $('#tool-view').setAttribute('aria-expanded', String(!pop.hidden));
   }
 
-  function toggleSnapPop(show) {
-    const pop = $('#snap-pop');
-    const btn = $('#tool-snap');
+  function toggleViewPop(show) {
+    const pop = $('#view-pop');
+    const btn = $('#tool-view');
     pop.hidden = show === undefined ? !pop.hidden : !show;
     if (!pop.hidden) {
       const st = $('#stage').getBoundingClientRect();
       const br = btn.getBoundingClientRect();
-      const rail = $('.tool-rail').getBoundingClientRect();
-      pop.style.top = Math.round(rail.bottom - st.top + 6) + 'px';
+      pop.style.top = Math.round(br.bottom - st.top + 8) + 'px';
       pop.style.left = Math.round(Math.max(8, Math.min(br.left - st.left, st.width - pop.offsetWidth - 8))) + 'px';
     }
-    syncSnapPop();
+    syncViewPop();
   }
 
-  function bindSnapPop() {
-    const pop = $('#snap-pop');
-    $('#tool-snap').addEventListener('click', (e) => {
+  function bindViewPop() {
+    const pop = $('#view-pop');
+    $('#tool-view').addEventListener('click', (e) => {
       e.stopPropagation();
-      toggleSnapPop();
+      toggleViewPop();
     });
     pop.addEventListener('change', (e) => {
       const k = e.target.getAttribute('data-pref');
       if (k) app.setPref(k, e.target.checked);
+      const ov = e.target.getAttribute('data-ov');
+      if (ov) app.setOverlay(ov, e.target.checked);
     });
     pop.addEventListener('click', (e) => {
       const b = e.target.closest('[data-grid]');
       if (b) app.setPref('grid', Number(b.getAttribute('data-grid')));
     });
     document.addEventListener('pointerdown', (e) => {
-      if (!pop.hidden && !e.target.closest('#snap-pop, #tool-snap')) toggleSnapPop(false);
+      if (!pop.hidden && !e.target.closest('#view-pop, #tool-view')) toggleViewPop(false);
     });
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !pop.hidden) toggleSnapPop(false);
+      if (e.key === 'Escape' && !pop.hidden) toggleViewPop(false);
     });
+  }
+
+  /* Datei-Menü */
+  function toggleFileMenu(show) {
+    const menu = $('#file-menu');
+    const btn = $('#btn-file');
+    menu.hidden = show === undefined ? !menu.hidden : !show;
+    btn.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) {
+      const multi = !!app.doc.phases;
+      menu.querySelector('[data-act="printRebuild"]').hidden = !(multi && app.phaseIndex() > 0);
+      menu.querySelector('[data-act="printSeating"]').hidden = !app.learners().length;
+      const br = btn.getBoundingClientRect();
+      menu.style.right = Math.max(8, Math.round(window.innerWidth - br.right)) + 'px';
+      const first = menu.querySelector('button:not([hidden])');
+      if (first) first.focus();
+    }
   }
 
   function bindTools() {
@@ -844,12 +989,10 @@
       if (app.multi) app.setMode('select');
       syncTools();
     });
-    for (const b of $$('.tool[data-overlay]')) {
+    for (const b of $$('.tool[data-lens]')) {
       b.addEventListener('click', () => {
-        const k = b.getAttribute('data-overlay');
-        const on = !app.overlay[k];
-        if (on && (k === 'access' || k === 'sight')) setAccOpen(k, true);
-        app.setOverlay(k, on);
+        const k = b.getAttribute('data-lens');
+        setLens(app.overlay[k] ? null : k);
       });
     }
     $('#zoom-in').addEventListener('click', () => app.zoomBy(1 / 1.3));
@@ -857,33 +1000,40 @@
     $('#zoom-fit').addEventListener('click', () => app.fitView());
     $('#btn-undo').addEventListener('click', () => app.undo());
     $('#btn-redo').addEventListener('click', () => app.redo());
-    $('#btn-new').addEventListener('click', openNew);
-    $('#btn-plans').addEventListener('click', openPlans);
-    $('#btn-export').addEventListener('click', exportPNG);
-    $('#btn-print').addEventListener('click', printPlan);
     $('#btn-share').addEventListener('click', openShare);
-    $('#btn-settings').addEventListener('click', openSettings);
     $('#btn-help').addEventListener('click', openHelp);
-    $('#btn-left').addEventListener('click', () => toggleSide('left'));
     $('#btn-right').addEventListener('click', () => toggleSide('right'));
-    const more = $('#more-menu');
-    $('#btn-more').addEventListener('click', (e) => {
+    $('#btn-file').addEventListener('click', (e) => {
       e.stopPropagation();
-      more.hidden = !more.hidden;
-      $('#btn-more').setAttribute('aria-expanded', String(!more.hidden));
+      toggleFileMenu();
     });
-    more.addEventListener('click', (e) => {
+    const menu = $('#file-menu');
+    menu.addEventListener('click', (e) => {
       const b = e.target.closest('[data-act]');
       if (!b) return;
-      more.hidden = true;
+      toggleFileMenu(false);
       doAct(b.getAttribute('data-act'));
     });
+    menu.addEventListener('keydown', (e) => {
+      const items = $$('button:not([hidden])', menu);
+      const i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+      } else if (e.key === 'Escape') {
+        toggleFileMenu(false);
+        $('#btn-file').focus();
+      }
+    });
     document.addEventListener('click', (e) => {
-      if (!more.hidden && !e.target.closest('#more-menu')) more.hidden = true;
+      if (!menu.hidden && !e.target.closest('#file-menu, #btn-file')) toggleFileMenu(false);
     });
     document.body.addEventListener('click', (e) => {
       const b = e.target.closest('#props [data-act], #checks [data-act], #sel-bar [data-act]');
       if (b) doAct(b.getAttribute('data-act'));
+    });
+    $('#stage-hint').addEventListener('click', (e) => {
+      if (e.target.closest('[data-hint="cancel"]')) app.emit('place', null);
     });
     const name = $('#plan-name');
     name.addEventListener('change', () => {
@@ -895,29 +1045,48 @@
     window.addEventListener('keydown', app.onKey);
   }
 
-  /* ---------- Tabs & Schubladen (mobil) ---------- */
+  /* ---------- Bibliothek (links) ---------- */
   function setTab(tab) {
-    for (const b of $$('.tabs [role="tab"]')) {
+    if (!TABS[tab]) tab = 'catalog';
+    panels.tab = tab;
+    savePanels();
+    for (const b of $$('.activity [role="tab"]')) {
       const on = b.getAttribute('data-tab') === tab;
       b.setAttribute('aria-selected', String(on));
       b.tabIndex = on ? 0 : -1;
     }
-    for (const id of ['catalog', 'presets', 'objects']) $('#tab-' + id).hidden = id !== tab;
+    for (const id of Object.keys(TABS)) $('#tab-' + id).hidden = id !== tab;
+    $('#lib-title').textContent = TABS[tab];
     if (tab === 'objects') renderObjects();
+    if (LLR.classUI) LLR.classUI.onTab(tab);
+  }
+
+  function openLibTab(tab) {
+    setTab(tab);
+    if (mobile()) openLeft(tab);
+    else if (!panels.left) toggleSide('left', true);
   }
 
   function bindTabs() {
-    const tabs = $$('.tabs [role="tab"]');
+    const tabs = $$('.activity [role="tab"]');
     for (const b of tabs) {
-      b.addEventListener('click', () => setTab(b.getAttribute('data-tab')));
+      b.addEventListener('click', () => {
+        const tab = b.getAttribute('data-tab');
+        // Am Computer: aktiven Reiter erneut antippen klappt die Bibliothek ein
+        if (!mobile() && tab === panels.tab && panels.left) return toggleSide('left', false);
+        setTab(tab);
+        if (!mobile() && !panels.left) toggleSide('left', true);
+      });
       b.addEventListener('keydown', (e) => {
-        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault();
         const i = tabs.indexOf(b);
-        const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        const n = tabs[(i + (e.key === 'ArrowDown' ? 1 : tabs.length - 1)) % tabs.length];
         n.focus();
         setTab(n.getAttribute('data-tab'));
       });
     }
+    $('#btn-lib-close').addEventListener('click', () => (mobile() ? closeDrawers() : toggleSide('left', false)));
   }
 
   /* Seitenleisten am Computer ein- und ausklappen */
@@ -925,7 +1094,6 @@
     const ws = $('.workspace');
     ws.classList.toggle('no-left', !panels.left);
     ws.classList.toggle('no-right', !panels.right);
-    $('#btn-left').setAttribute('aria-expanded', String(panels.left));
     $('#btn-right').setAttribute('aria-expanded', String(panels.right));
     renderSelBar();
   }
@@ -933,8 +1101,10 @@
     panels[side] = open === undefined ? !panels[side] : open;
     savePanels();
     applySides();
+    if (side === 'right') syncNeeds();
   }
   function showDetails() {
+    showRightView('props');
     if (mobile()) openRight('props');
     else {
       if (!panels.right) toggleSide('right', true);
@@ -942,9 +1112,22 @@
     }
   }
 
-  function setSheetView(view) {
-    $('#panel-right').setAttribute('data-view', view);
-    for (const b of $$('.sheet-tabs [data-view]')) b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === view));
+  /* Rechte Seite: Details oder Prüfen. Mit Auswahl stehen die Details vorn,
+     ohne Auswahl die zuletzt gewählte Ansicht. */
+  let rightView = 'props';
+  function showRightView(view) {
+    rightView = view;
+    $('#props').hidden = view !== 'props';
+    $('#checks').hidden = view !== 'checks';
+    for (const b of $$('.right-tabs [data-view]')) b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === view));
+    syncNeeds();
+    if (view === 'checks') renderChecks();
+    else renderProps();
+  }
+  /* Rollstuhl-Analyse auch ohne Darstellung im Plan, wenn Prüfen sichtbar ist */
+  function syncNeeds() {
+    const visible = rightView === 'checks' && (mobile() ? $('#panel-right').classList.contains('open') : panels.right);
+    app.setNeed('access', visible || (rightView === 'props' && app.selectedObjects().some((o) => A.isTable(o) || o.type === 'wheelchair')) || !!(app.learners().length && (panels.tab === 'learners' || app.overlay.seating)));
   }
 
   function openLeft(tab) {
@@ -953,14 +1136,19 @@
     $('#panel-right').classList.remove('open');
     $('#scrim').hidden = false;
   }
-  function openRight(section) {
-    setSheetView(section === 'checks' ? 'checks' : 'props');
+  function openRight(view) {
+    showRightView(view === 'checks' ? 'checks' : 'props');
+    if (view === 'checks' || view === 'props') {
+      panels.view = view;
+      savePanels();
+    }
     const panel = $('#panel-right');
     panel.classList.add('open');
     panel.style.transform = '';
     $('#panel-left').classList.remove('open');
     $('#scrim').hidden = false;
     panel.scrollTop = 0;
+    syncNeeds();
   }
   function closeDrawers() {
     $('#panel-left').classList.remove('open');
@@ -968,6 +1156,7 @@
     panel.classList.remove('open');
     panel.style.transform = '';
     $('#scrim').hidden = true;
+    syncNeeds();
   }
 
   function bindDrawers() {
@@ -977,17 +1166,22 @@
     for (const b of $$('.mobile-bar [data-open]')) {
       b.addEventListener('click', () => {
         const k = b.getAttribute('data-open');
-        if (k === 'catalog' || k === 'presets') openLeft(k);
+        if (TABS[k]) openLeft(k);
         else openRight(k);
       });
     }
-    for (const b of $$('.sheet-tabs [data-view]')) b.addEventListener('click', () => {
-      setSheetView(b.getAttribute('data-view'));
-      $('#panel-right').scrollTop = 0;
-    });
+    for (const b of $$('.right-tabs [data-view]')) {
+      b.addEventListener('click', () => {
+        const v = b.getAttribute('data-view');
+        panels.view = v;
+        savePanels();
+        showRightView(v);
+        $('#panel-right').scrollTop = 0;
+      });
+    }
     // Unteres Blatt (Smartphone) am Kopf nach unten wischen schließt es
     const panel = $('#panel-right');
-    const head = $('.sheet-head');
+    const head = $('.right-head');
     let swipe = null;
     head.addEventListener('pointerdown', (e) => {
       if (!phone() || e.target.closest('button')) return;
@@ -1010,13 +1204,19 @@
     head.addEventListener('pointerup', end);
     head.addEventListener('pointercancel', end);
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeDrawers();
+      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) closeDrawers();
     });
-    // Wechsel zwischen Handy-/Tablet- und Computer-Ansicht
     window.matchMedia('(max-width: 900px)').addEventListener('change', () => {
       closeDrawers();
       renderSelBar();
+      syncLibClose();
     });
+    syncLibClose();
+  }
+  /* Schließen-Symbol der Bibliothek: am Computer einklappen, mobil schließen */
+  function syncLibClose() {
+    const u = $('#btn-lib-close use');
+    u.setAttribute('href', mobile() ? '#i-x' : '#i-chev-left');
   }
 
   /* ---------- Dialoge ---------- */
@@ -1068,12 +1268,14 @@
 
   /* Neuer Plan */
   async function openNew() {
+    const hasL = app.learners().length > 0;
     const v = await openDialog({
       title: 'Neuer Plan',
       body: `<p>Womit möchten Sie beginnen? Der aktuelle Plan wird ersetzt (Rückgängig mit <span class="kbd">Strg</span>+<span class="kbd">Z</span> möglich; vorher ggf. unter „Pläne“ speichern).</p>
         <label class="toggle"><input type="radio" name="newkind" value="seminar1" checked> LLR wie eingerichtet (Seminarsitzordnung I)</label>
         <label class="toggle"><input type="radio" name="newkind" value="furnished"> LLR ohne Tische & Stühle (nur feste Einrichtung)</label>
-        <label class="toggle"><input type="radio" name="newkind" value="empty"> Leerer Raum (nur Tür & Fenster)</label>`,
+        <label class="toggle"><input type="radio" name="newkind" value="empty"> Leerer Raum (nur Tür & Fenster)</label>
+        ${hasL ? `<label class="toggle" style="margin-top:6px"><input type="checkbox" id="new-keep-l" checked><span>Lernendenliste behalten<small>${app.learners().length} Lernende mit ihren Bedarfen (ohne Sitzplätze)</small></span></label>` : ''}`,
       buttons: [
         { label: 'Abbrechen', value: 'cancel' },
         { label: 'Neu anlegen', value: 'ok', cls: 'primary' },
@@ -1082,12 +1284,14 @@
     });
     if (v !== 'ok') return;
     const kind = $('#dlg-body')._kind();
+    const keepL = hasL && $('#new-keep-l') && $('#new-keep-l').checked;
     const doc = app.createDoc(kind === 'seminar1' ? 'seminar1' : null);
     doc.room = Object.assign({}, app.doc.room);
     doc.settings = Object.assign({}, app.doc.settings);
     doc.objects = LLR.roomFurniture(doc.room);
     if (kind === 'seminar1') doc.objects = doc.objects.concat(app.buildPreset(LLR.PRESETS[0], doc));
     if (kind === 'empty') doc.objects = doc.objects.filter((o) => o.type === 'door' || o.type === 'window');
+    if (keepL) doc.learners = JSON.parse(JSON.stringify(app.learners()));
     replaceDoc(doc);
     toast('Neuer Plan angelegt');
   }
@@ -1095,15 +1299,14 @@
   function replaceDoc(doc) {
     const n = app.normalizeDoc(doc);
     app.mutate((d) => {
-      d.name = n.name;
-      d.room = n.room;
-      d.settings = n.settings;
-      d.objects = n.objects;
+      for (const k of Object.keys(d)) delete d[k];
+      Object.assign(d, n);
     });
     app.sel = new Set();
     app.renderRoom();
     app.fitView();
     app.emit('select');
+    app.emit('phase');
   }
 
   /* Einstellungen */
@@ -1119,7 +1322,7 @@
           <label class="field">Länge (m)<input type="number" id="set-l" value="${(r.l / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
         </div>
         <p class="area-hint" id="set-area"></p>
-        <p class="desc">Möbel an der rechten Wand und an der Rückwand wandern beim Ändern mit. Tür, Fenster und Wandobjekte bleiben an ihrer Wand.</p>
+        <p class="desc">Möbel an der rechten Wand und an der Rückwand wandern beim Ändern mit (in allen Phasen). Tür, Fenster und Wandobjekte bleiben an ihrer Wand.</p>
         <h3>Möbelmaße</h3>
         <div class="field-grid">
           <label class="field">Tisch: lange Seite (cm)<input type="number" id="set-tb" value="${s.tableBase}" min="60" max="200" step="1"></label>
@@ -1128,13 +1331,14 @@
           <label class="field">Stuhl: Breite (cm)<input type="number" id="set-cw" value="${s.chairW}" min="30" max="80" step="1"></label>
           <label class="field">Stuhl: Tiefe (cm)<input type="number" id="set-cd" value="${s.chairD}" min="30" max="90" step="1"></label>
         </div>
-        <h3>Barrierefreiheit</h3>
-        <div class="field-grid two">
-          <label class="field">Mindest-Durchgangsbreite (cm)<input type="number" id="set-pass" value="${s.passage}" min="60" max="200" step="5"></label>
-          <label class="field">Wendekreis Ø (cm)<input type="number" id="set-turn" value="${s.turning}" min="100" max="250" step="5"></label>
+        <h3>Barrierefreiheit & Laufwege</h3>
+        <div class="field-grid">
+          <label class="field">Rollstuhl: Durchgang (cm)<input type="number" id="set-pass" value="${s.passage}" min="60" max="200" step="5"></label>
+          <label class="field">Rollstuhl: Wendekreis Ø (cm)<input type="number" id="set-turn" value="${s.turning}" min="100" max="250" step="5"></label>
+          <label class="field">Gehen: bequemer Durchgang (cm)<input type="number" id="set-walk" value="${s.walk || 50}" min="36" max="120" step="5"></label>
         </div>
-        <label class="toggle"><input type="checkbox" id="set-block" ${s.chairsBlock ? 'checked' : ''}> Stühle und Hocker als Hindernis zählen</label>
-        <p class="desc">DIN 18040-1: Durchgänge mind. 90 cm, Bewegungsflächen 150 × 150 cm.</p>
+        <label class="toggle"><input type="checkbox" id="set-block" ${s.chairsBlock ? 'checked' : ''}> Stühle und Hocker beim Rollstuhl-Check als Hindernis zählen</label>
+        <p class="desc">DIN 18040-1: Durchgänge mind. 90 cm, Bewegungsflächen 150 × 150 cm. Beim Gehen (Lehrkraft-Check, Laufwege) gilt ab 36 cm als Engstelle, durch die man sich seitlich hindurchschiebt.</p>
         <h3>Bedienung</h3>
         <label class="toggle"><input type="checkbox" id="set-snap" ${s.snap ? 'checked' : ''}> Magnetisch einrasten (Tischkanten, Wände, Stühle zum Tisch) <small>Alt-Taste hält das Einrasten kurz an</small></label>
         <label class="toggle"><input type="checkbox" id="set-carry" ${s.carryChairs ? 'checked' : ''}> Angestellte Stühle beim Verschieben von Tischen mitnehmen</label>
@@ -1172,6 +1376,7 @@
       $('#set-cd').value = d.chairD;
       $('#set-pass').value = d.passage;
       $('#set-turn').value = d.turning;
+      $('#set-walk').value = d.walk;
       $('#set-block').checked = d.chairsBlock;
       $('#set-snap').checked = d.snap;
       $('#set-carry').checked = d.carryChairs;
@@ -1196,6 +1401,7 @@
       st.chairD = val('#set-cd', st.chairD, 30, 90);
       st.passage = val('#set-pass', st.passage, 60, 200);
       st.turning = val('#set-turn', st.turning, 100, 250);
+      st.walk = val('#set-walk', st.walk || 50, 36, 120);
       st.chairsBlock = $('#set-block').checked;
       st.snap = $('#set-snap').checked;
       st.carryChairs = $('#set-carry').checked;
@@ -1231,13 +1437,14 @@
       const list = loadPlans();
       let h = `<h3>Im Browser speichern</h3>
         <div class="share-box"><input type="text" id="plan-save-name" value="${esc(app.doc.name)}" aria-label="Name"><button type="button" class="btn primary" id="plan-save">${icon('i-save')}Speichern</button></div>
-        <p class="desc">Pläne werden nur in diesem Browser auf diesem Gerät gespeichert.</p>
+        <p class="desc" style="margin-top:6px">Pläne werden nur in diesem Browser auf diesem Gerät gespeichert – mit allen Phasen und der Lernendenliste.</p>
         <h3>Gespeicherte Pläne (${list.length})</h3>`;
       if (!list.length) h += `<p class="desc">Noch keine Pläne gespeichert.</p>`;
       else {
         h += `<ul class="plans-list">`;
         for (const p of list.slice().sort((a, b) => b.date - a.date)) {
-          h += `<li><span class="p-name"><strong>${esc(p.name)}</strong><small>${new Date(p.date).toLocaleString('de-DE')}</small></span>
+          const ph = p.doc && Array.isArray(p.doc.phases) ? ` · ${p.doc.phases.length} Phasen` : '';
+          h += `<li><span class="p-name"><strong>${esc(p.name)}</strong><small>${new Date(p.date).toLocaleString('de-DE')}${ph}</small></span>
             <button type="button" class="btn outline small" data-load="${p.id}">Öffnen</button>
             <button type="button" class="icon-btn danger" data-delp="${p.id}" aria-label="Löschen" title="Löschen">${icon('i-trash')}</button></li>`;
         }
@@ -1246,7 +1453,7 @@
       h += `<h3>Als Datei</h3><div class="btn-row">
         <button type="button" class="btn outline" id="plan-dl">${icon('i-download')}Herunterladen (.json)</button>
         <button type="button" class="btn outline" id="plan-ul">${icon('i-upload')}Datei öffnen</button></div>
-        <p class="desc">Dateien lassen sich per E-Mail oder OPAL weitergeben und hier wieder öffnen.</p>`;
+        <p class="desc" style="margin-top:6px">Dateien lassen sich per E-Mail oder OPAL weitergeben und hier wieder öffnen.</p>`;
       body.innerHTML = h;
     };
     openDialog({
@@ -1297,9 +1504,9 @@
     });
   }
 
-  const fileName = (ext) => {
+  const fileName = (ext, suffix) => {
     const map = { ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' };
-    const base = (app.doc.name || 'raumplan').replace(/[äöüÄÖÜß]/g, (c) => map[c]).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_');
+    const base = ((app.doc.name || 'raumplan') + (suffix || '')).replace(/[äöüÄÖÜß]/g, (c) => map[c]).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_');
     return (base || 'raumplan') + ext;
   };
 
@@ -1351,23 +1558,36 @@
     return out;
   };
 
-  function compactDoc() {
+  /* Kompakte Fassung für den Link: kurze IDs (in allen Phasen gleich, damit
+     der Umbau erhalten bleibt), gerundete Werte; Lernende nur auf Wunsch */
+  function compactDoc(withLearners) {
     const d = JSON.parse(app.serialize());
     const r1 = (v) => Math.round(v * 10) / 10;
-    d.objects = d.objects.map((o) => {
-      const c = Object.assign({}, o);
-      delete c.id;
-      c.x = r1(c.x);
-      c.y = r1(c.y);
-      c.rot = r1(c.rot || 0);
-      if (!c.rot) delete c.rot;
-      return c;
-    });
+    const ids = new Map();
+    const short = (id) => {
+      if (!ids.has(id)) ids.set(id, ids.size.toString(36));
+      return ids.get(id);
+    };
+    const pack = (list) =>
+      (list || []).map((o) => {
+        const c = Object.assign({}, o);
+        if (d.phases) c.id = short(o.id);
+        else delete c.id;
+        c.x = r1(c.x);
+        c.y = r1(c.y);
+        c.rot = r1(c.rot || 0);
+        if (!c.rot) delete c.rot;
+        if (!withLearners) delete c.learner;
+        return c;
+      });
+    d.objects = pack(d.objects);
+    if (d.phases) for (const ph of d.phases) if (ph.objects) ph.objects = pack(ph.objects);
+    if (!withLearners) delete d.learners;
     return d;
   }
 
-  async function packDoc() {
-    const json = JSON.stringify(compactDoc());
+  async function packDoc(withLearners) {
+    const json = JSON.stringify(compactDoc(withLearners));
     if ('CompressionStream' in window) {
       try {
         const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'));
@@ -1391,14 +1611,17 @@
   }
 
   async function openShare() {
-    const code = await packDoc();
-    const url = location.origin + location.pathname + '#p=' + code;
+    const hasL = app.learners().length > 0;
+    const build = async (withL) => location.origin + location.pathname + '#p=' + (await packDoc(withL));
+    let url = await build(false);
     const canShare = !!navigator.share;
+    const info = (u) => `Länge: ${u.length} Zeichen.${u.length > 2000 ? ' Sehr lange Links funktionieren nicht überall – dann besser „Pläne → Herunterladen“ verwenden.' : ''}`;
     openDialog({
       title: 'Plan teilen',
-      body: `<p>Der komplette Plan steckt in diesem Link – es wird nichts auf einem Server gespeichert. Wer den Link öffnet, sieht den Plan und kann ihn weiter bearbeiten.</p>
+      body: `<p>Der komplette Plan${app.doc.phases ? ' mit allen Phasen' : ''} steckt in diesem Link – es wird nichts auf einem Server gespeichert. Wer den Link öffnet, sieht den Plan und kann ihn weiter bearbeiten.</p>
         <div class="share-box"><input type="text" id="share-url" readonly value="${esc(url)}" aria-label="Link zum Plan"></div>
-        <p class="desc">Länge: ${url.length} Zeichen.${url.length > 2000 ? ' Sehr lange Links funktionieren nicht überall – dann besser „Pläne → Herunterladen“ verwenden.' : ''}</p>`,
+        <p class="desc" id="share-info" style="margin-top:6px">${info(url)}</p>
+        ${hasL ? `<label class="toggle"><input type="checkbox" id="share-l"><span>Sitzplan mit Lernenden mitteilen<small>Namen und Bedarfe stehen dann im Link. Aus Datenschutzgründen nur Kürzel verwenden und den Link nicht öffentlich teilen.</small></span></label>` : ''}`,
       buttons: [
         ...(canShare ? [{ label: 'Teilen …', onClick: () => navigator.share({ title: app.doc.name, url }).catch(() => {}) }] : []),
         {
@@ -1420,6 +1643,13 @@
       onOpen: () => {
         const inp = $('#share-url');
         inp.addEventListener('focus', () => inp.select());
+        const cb = $('#share-l');
+        if (cb)
+          cb.addEventListener('change', async () => {
+            url = await build(cb.checked);
+            inp.value = url;
+            $('#share-info').textContent = info(url);
+          });
       },
     });
   }
@@ -1429,8 +1659,8 @@
     opts = opts || {};
     const W = app.doc.room.w;
     const L = app.doc.room.l;
-    const pad = 55;
-    const head = 56;
+    const pad = opts.noTitle ? 40 : 55;
+    const head = opts.noTitle ? 0 : 56;
     const x0 = -20 - pad;
     const y0 = -20 - pad - head;
     const w = W + 2 * (20 + pad);
@@ -1440,13 +1670,36 @@
     s += `<rect x="${x0}" y="${y0}" width="${w}" height="${h}" fill="#ffffff"/>`;
     s += svg.querySelector('defs').outerHTML;
     if (!opts.noTitle) {
-      s += `<text x="${x0 + 24}" y="${y0 + 34}" font-size="24" font-weight="700" fill="#1d2433">${esc(app.doc.name)}</text>`;
+      const ph = app.doc.phases ? ` – ${app.phases()[app.phaseIndex()].name}` : '';
+      s += `<text x="${x0 + 24}" y="${y0 + 34}" font-size="24" font-weight="700" fill="#1d2433">${esc(app.doc.name + ph)}</text>`;
       s += `<text x="${x0 + w - 24}" y="${y0 + 34}" font-size="14" fill="#5f6b7a" text-anchor="end">LLR · ${new Date().toLocaleDateString('de-DE')}</text>`;
     }
     s += `<g>${app.els.floor.innerHTML}</g><g>${app.els.analysis.innerHTML}</g><g>${app.els.walls.innerHTML}</g><g>${app.els.objects.innerHTML}</g><g>${app.els.tags.innerHTML}</g><g>${app.els.marks.innerHTML}</g>`;
     s += `</svg>`;
     if (opts.prefix) s = s.replace(/id="([\w-]+)"/g, `id="${opts.prefix}$1"`).replace(/url\(#([\w-]+)\)/g, `url(#${opts.prefix}$1)`);
     return { svg: s, w: Math.round(w * scale), h: Math.round(h * scale) };
+  }
+
+  /* Plan kurz mit einer bestimmten Prüfansicht zeichnen (für Druck/Export) */
+  function withLens(lens, fn) {
+    const prev = app.lens();
+    const sel = app.sel;
+    if (lens !== undefined && lens !== prev) {
+      for (const k of app.LENSES) app.overlay[k] = k === lens;
+      app.sel = new Set();
+      app.renderAnalysisLayer();
+      app.renderMarks();
+    }
+    try {
+      return fn();
+    } finally {
+      if (lens !== undefined && lens !== prev) {
+        for (const k of app.LENSES) app.overlay[k] = k === prev;
+        app.sel = sel;
+        app.renderAnalysisLayer();
+        app.renderOverlay();
+      }
+    }
   }
 
   function exportPNG() {
@@ -1472,81 +1725,115 @@
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   }
 
-  function buildPrintSheet() {
-    const st = app.stats();
-    const c = st.count;
-    const { svg } = buildExportSVG(1, { noTitle: true, prefix: 'pr-' });
-    let h = `<h1>${esc(app.doc.name)}</h1><div class="sub">Lehr-Lern-Raum Inklusion (LLR) · ${app.fmtM(app.doc.room.w)} × ${app.fmtM(app.doc.room.l)} (${app.fmtArea(app.doc.room.w * app.doc.room.l)}) · ${new Date().toLocaleString('de-DE')}</div>`;
-    h += `<div class="plan">${svg}</div>`;
-    h += `<div class="cols"><table><tr><th colspan="2">Belegung</th></tr>
-      <tr><td>Dreieckstische</td><td>${c.table || 0} / 12</td></tr>
-      ${c.tableRect ? `<tr><td>Rechtecktische</td><td>${c.tableRect}</td></tr>` : ''}
-      <tr><td>Stühle</td><td>${c.chair || 0} / 19</td></tr>
-      <tr><td>Hocker</td><td>${c.stool || 0} / 2</td></tr>
-      ${st.wheelchairs ? `<tr><td>Rollstuhlplätze</td><td>${st.wheelchairs}</td></tr>` : ''}
-      <tr><td><strong>Arbeitsplätze gesamt</strong></td><td><strong>${st.seats}</strong> (empfohlen max. 24)</td></tr>
-      <tr><td>Lounge (Sofa, Sitzsäcke)</td><td>${st.lounge}</td></tr>`;
-    for (const z of app.doc.objects.filter((o) => T[o.type].kind === 'zone')) h += `<tr><td>Zone „${esc(z.label || 'Zone')}“</td><td>${LLR.zoneArea(z)}</td></tr>`;
-    h += `</table>`;
-    h += `<table><tr><th colspan="2">Prüfungen</th></tr><tr><td>Überschneidungen</td><td>${app.problems.size ? app.problems.size + ' Objekt(e)' : 'keine'}</td></tr>`;
-    const a = app.overlay.access ? app.access : A.access(app.doc, { image: false });
-    if (a) {
-      h += `<tr><td>Tür mit Rollstuhl erreichbar</td><td>${a.doorOk ? 'ja' : 'nein'}</td></tr>
-        <tr><td>Befahrbare Fläche</td><td>${num(a.sweptArea)} m²</td></tr>
-        <tr><td>Wenden (Ø ${app.doc.settings.turning} cm)</td><td>${a.turnPossible ? 'möglich' : 'nicht möglich'}</td></tr>
-        <tr><td>Tische mit Rollstuhlplatz (Weg von der Tür geprüft)</td><td>${a.tablesNow} sofort${a.tablesLater ? `, ${a.tablesLater} nach Wegstellen ${a.laterMove > 1 ? 'von 1–2 Stühlen' : 'eines Stuhls'}` : ''}</td></tr>`;
+  function printHead(title) {
+    const ph = app.doc.phases ? ` · Phase ${app.phaseIndex() + 1}: ${esc(app.phases()[app.phaseIndex()].name)}` : '';
+    return `<h1>${esc(title)}</h1><div class="sub">Lehr-Lern-Raum Inklusion (LLR) · ${app.fmtM(app.doc.room.w)} × ${app.fmtM(app.doc.room.l)} (${app.fmtArea(app.doc.room.w * app.doc.room.l)})${ph} · ${new Date().toLocaleString('de-DE')}</div>`;
+  }
+
+  function buildPrintSheet(kind) {
+    kind = kind || 'plan';
+    let h = '';
+    if (kind === 'rebuild') {
+      const rb = app.rebuildFromPrev();
+      if (!rb) return buildPrintSheet('plan');
+      const prev = app.phases()[app.phaseIndex() - 1].name;
+      const cur = app.phases()[app.phaseIndex()].name;
+      const { svg } = withLens('rebuild', () => buildExportSVG(1, { noTitle: true, prefix: 'pr-' }));
+      h += printHead(`Umbauplan: ${prev} → ${cur}`);
+      h += `<div class="plan">${svg}</div>`;
+      const steps = LLR.rebuildSteps(rb);
+      const chairs = rb.moved.filter((m) => m.type === 'chair' || m.type === 'stool');
+      h += `<div class="cols"><div><h2>Reihenfolge</h2><ol>${steps.map((s) => `<li>${esc(s.text)}</li>`).join('')}${chairs.length ? `<li>Danach ${chairs.length} Stühle/Hocker an die Tische stellen (zarte Pfeile im Plan).</li>` : ''}</ol>${!steps.length && !chairs.length ? '<p>Keine Möbel zu bewegen.</p>' : ''}</div>`;
+      h += `<div><h2>Aufwand</h2><table><tr><td>Tische</td><td>${rb.tables}</td></tr><tr><td>Stühle und Hocker</td><td>${rb.seats}</td></tr><tr><td>Weitere Möbel</td><td>${rb.other}</td></tr><tr><td>Wege zusammen</td><td>${m1(rb.distSum)}</td></tr><tr><td>Zeit (grobe Schätzung)</td><td>allein ca. ${Math.max(1, Math.round(rb.sec / 60))} min · zu viert ca. ${Math.max(1, Math.round(rb.sec / 4 / 60 + 0.5))} min</td></tr></table>`;
+      if (rb.added.length || rb.removed.length) h += `<p style="font-size:9.5pt">${rb.added.length ? `Neu hinstellen: ${rb.added.length} (grünes +). ` : ''}${rb.removed.length ? `Wegräumen: ${rb.removed.length} (rotes ×).` : ''}</p>`;
+      h += `</div></div><div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Lila gestrichelt: Position in der vorigen Phase.</div>`;
+    } else if (kind === 'seating') {
+      const { svg } = withLens(undefined, () => buildExportSVG(1, { noTitle: true, prefix: 'pr-' }));
+      h += printHead(`Sitzplan: ${app.doc.name}`);
+      h += `<div class="plan">${svg}</div>`;
+      h += LLR.classUI ? LLR.classUI.printTable() : '';
+      h += `<div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Vertraulich – enthält Angaben zu Lernenden.</div>`;
+    } else {
+      const st = app.stats();
+      const c = st.count;
+      const { svg } = buildExportSVG(1, { noTitle: true, prefix: 'pr-' });
+      h += printHead(app.doc.name);
+      h += `<div class="plan">${svg}</div>`;
+      h += `<div class="cols"><table><tr><th colspan="2">Belegung</th></tr>
+        <tr><td>Dreieckstische</td><td>${c.table || 0} / 12</td></tr>
+        ${c.tableRect ? `<tr><td>Rechtecktische</td><td>${c.tableRect}</td></tr>` : ''}
+        <tr><td>Stühle</td><td>${c.chair || 0} / 19</td></tr>
+        <tr><td>Hocker</td><td>${c.stool || 0} / 2</td></tr>
+        ${st.wheelchairs ? `<tr><td>Rollstuhlplätze</td><td>${st.wheelchairs}</td></tr>` : ''}
+        <tr><td><strong>Arbeitsplätze gesamt</strong></td><td><strong>${st.seats}</strong> (empfohlen max. 24)</td></tr>
+        <tr><td>Lounge (Sofa, Sitzsäcke)</td><td>${st.lounge}</td></tr>`;
+      for (const z of app.doc.objects.filter((o) => T[o.type].kind === 'zone')) h += `<tr><td>Zone „${esc(z.label || 'Zone')}“</td><td>${LLR.zoneArea(z)}</td></tr>`;
+      h += `</table>`;
+      h += `<table><tr><th colspan="2">Prüfungen</th></tr><tr><td>Überschneidungen</td><td>${app.problems.size ? app.problems.size + ' Objekt(e)' : 'keine'}</td></tr>`;
+      const a = app.access && app.access.complete ? app.access : A.access(app.doc, { image: false });
+      if (a) {
+        h += `<tr><td>Tür mit Rollstuhl erreichbar</td><td>${a.doorOk ? 'ja' : 'nein'}</td></tr>
+          <tr><td>Befahrbare Fläche</td><td>${num(a.sweptArea)} m²</td></tr>
+          <tr><td>Wenden (Ø ${app.doc.settings.turning} cm)</td><td>${a.turnPossible ? 'möglich' : 'nicht möglich'}</td></tr>
+          <tr><td>Tische mit Rollstuhlplatz</td><td>${a.tablesNow} sofort${a.tablesLater ? `, ${a.tablesLater} nach Wegstellen ${a.laterMove > 1 ? 'von 1–2 Stühlen' : 'eines Stuhls'}` : ''}</td></tr>`;
+      }
+      const sg = app.getSight();
+      if (sg.seats.length && sg.surfaces.length) h += `<tr><td>Sicht auf Tafel & Bildschirme</td><td>${sg.good} direkt, ${sg.limited} eingeschränkt, ${sg.back} ohne Blick</td></tr>`;
+      const t = app.getTeacher();
+      if (t.seats.length) h += `<tr><td>Lehrkraft: erreichbar / Gesicht im Blick</td><td>${t.reachable} / ${t.face} von ${t.seats.length}</td></tr>`;
+      const cm = app.getCalm();
+      if (cm.seats.length) h += `<tr><td>Ruhe & Reize</td><td>${cm.calm} ruhig, ${cm.mid} mittel, ${cm.busy} unruhig</td></tr>`;
+      h += `</table></div><div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Prüfungen sind vereinfachte Modelle (Rollstuhl: Durchgang ${app.doc.settings.passage} cm, Wendekreis ${app.doc.settings.turning} cm) – sie ersetzen keine Prüfung vor Ort.</div>`;
     }
-    const sg = app.getSight();
-    if (sg.seats.length && sg.surfaces.length) h += `<tr><td>Sicht auf Tafel & Bildschirme</td><td>${sg.good} direkt, ${sg.limited} eingeschränkt, ${sg.back} ohne Blick</td></tr>`;
-    h += `</table></div><div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Rollstuhl-Check: vereinfachtes Modell (Durchgang ${app.doc.settings.passage} cm, Wendekreis ${app.doc.settings.turning} cm) – ersetzt keine Prüfung vor Ort.</div>`;
     $('#print-sheet').innerHTML = h;
   }
 
-  function printPlan() {
-    buildPrintSheet();
+  /* Druck über das Menü: gewählte Fassung; Strg+P ohne Menü: normaler Plan */
+  let printPending = null;
+  function printPlan(kind) {
+    printPending = kind || 'plan';
+    buildPrintSheet(printPending);
     setTimeout(() => window.print(), 50);
   }
-  window.addEventListener('beforeprint', buildPrintSheet);
+  window.addEventListener('beforeprint', () => {
+    if (!printPending) buildPrintSheet('plan');
+  });
+  window.addEventListener('afterprint', () => (printPending = null));
 
   /* ---------- Hilfe ---------- */
   function openHelp() {
+    const S = app.doc.settings;
+    const card = (ic, title, txt) => `<div class="help-card"><strong>${icon(ic)}${title}</strong><p>${txt}</p></div>`;
     openDialog({
-      title: 'Hilfe zum LLR-Raumplaner',
+      title: 'So funktioniert der LLR-Raumplaner',
       wide: true,
-      body: `<h3>Grundbedienung</h3>
-        <ul>
-          <li><strong>Möbel hinzufügen:</strong> links unter „Möbel“ antippen (oder am Computer in den Plan ziehen). Die Zahlen zeigen, wie viele davon im LLR vorhanden sind.</li>
-          <li><strong>Verschieben:</strong> Objekt antippen und ziehen. <strong>Drehen:</strong> am blauen Kreis über der Auswahl ziehen (rastet in ${app.doc.settings.angleSnap}°-Schritten ein, Umschalt = frei) oder Knöpfe −15°/+15°.</li>
-          <li><strong>Größe ändern:</strong> bei Rechtecktischen, Teppichen, Zonen, Schränken usw. an den kleinen Quadraten ziehen (Umschalt an einer Ecke = Seitenverhältnis behalten, Alt = zentimetergenau).</li>
-          <li><strong>Raumgröße:</strong> wenn nichts ausgewählt ist, an einer Wand oder an den blauen Griffen ziehen – oder die Maße rechts eintippen. Möbel an der Wand wandern mit.</li>
-          <li><strong>Tische kombinieren:</strong> Dreiecks- und Rechtecktische rasten magnetisch an die Kanten anderer Tische an. Angestellte Stühle wandern beim Verschieben und Drehen eines Tisches mit. <strong>Doppelklick bzw. Doppeltipp</strong> auf einen Tisch wählt die ganze Tischgruppe samt Stühlen aus.</li>
-          <li><strong>Einrasten:</strong> über das Magnet-Symbol lassen sich das magnetische Einrasten, das Mitnehmen der Stühle und das Einrasten am Raster (mit Rastergröße) schnell an- und ausschalten. Das Mitnehmen der Stühle gibt es auch als Knopf in der Leiste unten, sobald ein Tisch ausgewählt ist.</li>
-          <li><strong>Stühle:</strong> drehen sich automatisch zum nächsten Tisch, wenn man sie an eine Tischkante zieht.</li>
-          <li><strong>Trennwände:</strong> rasten an den Enden aneinander ein – gerade, im 45°/90°-Winkel oder als T. So lässt sich eine längere Wand zusammenbauen; Doppelklick wählt die ganze Wand.</li>
-          <li><strong>Zonen:</strong> unter „Möbel → Zonen“ Bereiche wie Ruhezone oder Gruppenarbeit einzeichnen. Eine Zone wird am Rand oder am Namensschild angefasst, die Fläche darin bleibt frei bedienbar.</li>
+      body: `<div class="help-grid">
+          ${card('i-box', 'Einrichten', 'Links unter „Möbel“ antippen oder in den Plan ziehen. „Anordnungen“ übernimmt eine Sitzordnung aus der Handreichung.')}
+          ${card('i-panel', 'Details', 'Ein Objekt antippen: rechts stehen Maße, Farbe und seine Prüfergebnisse. Ohne Auswahl: Raum und Belegung.')}
+          ${card('i-check', 'Prüfen', 'Rollstuhl, Sicht, Lehrkraft und Ruhe – oben im Plan oder rechts unter „Prüfen“. Es ist immer eine Prüfung im Plan zu sehen.')}
+          ${card('i-users', 'Lernende & Sitzplan', 'Namen oder Kürzel eintragen, Bedarfe markieren und auf Plätze setzen – oder automatisch verteilen lassen.')}
+          ${card('i-steps', 'Phasen', 'Mehrere Anordnungen für eine Stunde (z. B. Kreis → Gruppenarbeit). Mit Übergang, Umbauaufwand und Umbauplan.')}
+          ${card('i-link', 'Speichern & Teilen', 'Automatische Sicherung im Browser. Im Datei-Menü: Pläne, Bild, Drucken. „Teilen“ erzeugt einen Link.')}
+        </div>
+        <details><summary>Bedienung im Plan</summary><ul>
+          <li><strong>Verschieben:</strong> Objekt antippen und ziehen. <strong>Drehen:</strong> am blauen Kreis über der Auswahl ziehen (rastet in ${S.angleSnap}°-Schritten ein, Umschalt = frei) oder mit den Knöpfen unten.</li>
+          <li><strong>Größe ändern:</strong> an den kleinen Quadraten ziehen (Umschalt an einer Ecke = Seitenverhältnis behalten, Alt = zentimetergenau).</li>
+          <li><strong>Raumgröße:</strong> ohne Auswahl an einer Wand oder an den blauen Griffen ziehen – oder rechts eintippen.</li>
+          <li><strong>Tische kombinieren:</strong> Tische rasten Kante an Kante ein, angestellte Stühle wandern mit. <strong>Doppelklick</strong> auf einen Tisch wählt die ganze Gruppe.</li>
+          <li><strong>Ansicht & Einrasten:</strong> Abstände, Raummaße, Raster sowie magnetisches Einrasten und Rastergröße.</li>
+          <li><strong>Mehrere Objekte:</strong> „Mehrfach“ aktivieren und antippen bzw. Rahmen aufziehen – am Computer mit gedrückter Umschalttaste.</li>
           <li><strong>Ansicht:</strong> leere Fläche ziehen = verschieben, Mausrad oder zwei Finger = zoomen.</li>
-          <li><strong>Mehrere Objekte:</strong> „Mehrfach“ aktivieren und antippen bzw. Rahmen aufziehen – am Computer mit gedrückter Umschalttaste. Tippen ins Leere hebt die Auswahl auf, <span class="kbd">Esc</span> zweimal beendet die Mehrfachauswahl.</li>
-          <li><strong>Anordnungen:</strong> alle Sitzordnungen aus der Handreichung lassen sich mit einem Klick übernehmen und danach frei anpassen.</li>
-          <li><strong>Mehr Platz:</strong> Die Seitenleisten lassen sich über die Symbole ganz links und ganz rechts in der oberen Leiste ein- und ausblenden. Auf dem Smartphone öffnen „Details“ und „Prüfen“ ein Blatt von unten, das sich nach unten wegwischen lässt.</li>
-        </ul>
-        <h3>Barrierefreiheit prüfen</h3>
-        <ul>
-          <li><strong>Prüfen & Zählen:</strong> Rollstuhl-Check und Sicht sind aufklappbare Abschnitte. Aufgeklappt zeigen sie die Ergebnisse, der Schalter „Im Plan“ blendet die Darstellung im Plan ein und aus.</li>
-          <li><strong>Rollstuhl-Check:</strong> färbt alle Flächen, die ein Rollstuhl von der Tür aus erreicht (hellgrün, Durchgang ≥ ${app.doc.settings.passage} cm). Dunkelgrün: hier kann gewendet werden (Ø ${app.doc.settings.turning} cm). Rot: frei, aber nur über zu enge Stellen erreichbar. Blaue Plaketten zeigen Tischkanten mit Rollstuhlplatz, gestrichelte erst nach Wegstellen eines Stuhls.</li>
-          <li><strong>Wegprüfung:</strong> Für jeden Rollstuhlplatz wird geprüft, ob von der Tür ein ausreichend breiter Weg hinführt – bei „Stuhl wegstellen“ mit allen übrigen Stühlen an ihrem Platz. Ein angetippter Tisch zeigt den Weg im Plan (blau) bzw. den Weg und den wegzustellenden Stuhl (orange).</li>
-          <li><strong>Test-Rollstuhl:</strong> im Abschnitt Rollstuhl-Check „Test-Rollstuhl hinzufügen“ – ein Rollstuhl (70 × 120 cm) mit Wendekreis. Er färbt sich rot, sobald er aneckt; eine grüne Linie zeigt den Weg von der Tür, sonst steht „Kein Weg von der Tür“ daneben. Entfernen lässt er sich dort oder wie jedes Objekt mit dem Papierkorb.</li>
-          <li><strong>Sicht:</strong> zeigt für jeden Sitzplatz, ob Tafel oder Bildschirm direkt im Blick sind (Haken), nur mit seitlich gedrehtem Kopf (!), ob jemand im Blickfeld sitzt (Person) oder ob es keinen Blick gibt (Kreuz). Personen in der Sichtachse verdecken je nach Abstand den unteren Teil der Fläche. Wer einen Sitzplatz antippt, sieht seinen <strong>Sichtkegel</strong>: das angenehme Blickfeld, sichtbare, verdeckte (rot) und durch Personen eingeschränkte Teile (orange) jeder Präsentationsfläche.</li>
-          <li><strong>Ansicht im Plan:</strong> „Abstände“ zeigt beim ausgewählten Objekt die Abstände zu den Nachbarn (grün ≥ ${app.doc.settings.passage} cm, orange ≥ 70 cm, rot darunter). „Raummaße“ blendet die Maße am Raumrand ein und aus, „Raster“ das Raster.</li>
-          <li><strong>Messen:</strong> Werkzeug „Messen“ wählen und eine Linie ziehen – die Enden rasten an Kanten ein.</li>
-        </ul>
-        <h3>Speichern & Weitergeben</h3>
-        <ul>
-          <li>Der Plan wird automatisch im Browser gesichert. Unter „Pläne“ lassen sich mehrere Varianten speichern oder als Datei herunterladen.</li>
-          <li>„Teilen“ erzeugt einen Link, der den kompletten Plan enthält. „Bild“ speichert ein PNG, „Drucken“ erstellt eine A4-Seite (auch als PDF).</li>
-          <li>Raummaße, Tisch- und Stuhlmaße sowie die Prüfwerte lassen sich unter „Raum & Einstellungen“ (Schieberegler-Symbol) anpassen.</li>
-        </ul>
-        <h3>Tastatur</h3>
-        <p><span class="kbd">Pfeiltasten</span> verschieben (mit <span class="kbd">Umschalt</span> 10 cm) · <span class="kbd">R</span> drehen · <span class="kbd">Entf</span> löschen · <span class="kbd">Strg</span>+<span class="kbd">D</span> duplizieren · <span class="kbd">Strg</span>+<span class="kbd">Z</span>/<span class="kbd">Y</span> rückgängig/wiederholen · <span class="kbd">L</span> sperren · <span class="kbd">M</span> messen · <span class="kbd">+</span>/<span class="kbd">−</span>/<span class="kbd">0</span> Zoom · <span class="kbd">Esc</span> Auswahl aufheben</p>`,
+          <li><strong>Mehr Platz:</strong> den aktiven Reiter links erneut antippen klappt die Bibliothek ein; das Symbol oben rechts blendet „Details & Prüfen“ aus.</li>
+        </ul></details>
+        <details><summary>Prüfungen</summary><ul>
+          <li><strong>Rollstuhl:</strong> befahrbare Flächen ab der Tür (Durchgang ≥ ${S.passage} cm), Wenden (Ø ${S.turning} cm), Rollstuhlplätze an Tischen mit geprüftem Weg. Test-Rollstuhl zum Ausprobieren.</li>
+          <li><strong>Sicht:</strong> je Platz, ob Tafel, Bildschirm oder Beamer-Fläche direkt, nur seitlich oder gar nicht im Blick sind – auch wenn Personen davor sitzen. Platz antippen zeigt den Sichtkegel.</li>
+          <li><strong>Lehrkraft:</strong> erreicht die Lehrkraft jeden Platz (Durchgang ≥ ${S.walk || 50} cm, Engstellen ab 36 cm) und sieht sie die Gesichter? Mit Lehrkraft-Positionen aus dem Katalog lassen sich Standorte vergleichen.</li>
+          <li><strong>Ruhe & Reize:</strong> Nähe zu Tür und Lounge, Laufwege anderer, Gedränge, Fensterblick und Spiegelungen. Regale und Trennwände dämpfen; Zonen namens „Ruhezone“ zählen als ruhig.</li>
+          <li><strong>Sitzplan & Bedarfe:</strong> prüft je Person die markierten Bedarfe am Platz (z. B. Hören: nah an Tafel und Lehrkraft).</li>
+          <li>Alle Prüfungen sind vereinfachte Modelle und ersetzen keine fachliche Prüfung vor Ort.</li>
+        </ul></details>
+        <details><summary>Tastatur</summary><p><span class="kbd">Pfeiltasten</span> verschieben (mit <span class="kbd">Umschalt</span> 10 cm) · <span class="kbd">R</span> drehen · <span class="kbd">Entf</span> löschen · <span class="kbd">Strg</span>+<span class="kbd">D</span> duplizieren · <span class="kbd">Strg</span>+<span class="kbd">Z</span>/<span class="kbd">Y</span> rückgängig/wiederholen · <span class="kbd">L</span> sperren · <span class="kbd">M</span> messen · <span class="kbd">+</span>/<span class="kbd">−</span>/<span class="kbd">0</span> Zoom · <span class="kbd">Esc</span> Auswahl aufheben</p></details>`,
       buttons: [{ label: 'Los geht’s', value: 'ok', cls: 'primary' }],
     });
   }
@@ -1579,7 +1866,6 @@
   /* ---------- Start ---------- */
   async function init() {
     applySides();
-    app.need.access = !!panels.access;
     app.mount($('#plan'));
     bindAll();
     let doc = null;
@@ -1610,49 +1896,63 @@
     }
     renderCatalog();
     renderPresets();
-    renderProps();
-    renderChecks();
+    setTab(panels.tab);
+    showRightView(panels.view === 'checks' ? 'checks' : 'props');
     renderLegend();
     syncTools();
     syncHistory();
     $('#plan-name').value = app.doc.name;
+    if (LLR.classUI) LLR.classUI.render();
 
     app.on('change', () => {
       updateBadges();
-      renderProps();
-      renderChecks();
+      if (rightView === 'props') renderProps();
+      else renderChecks();
       renderObjects();
       renderSelBar();
       syncHistory();
       if (document.activeElement !== $('#plan-name')) $('#plan-name').value = app.doc.name;
+      if (LLR.classUI) LLR.classUI.render();
     });
     app.on('live', () => {
       liveProps();
     });
+    let lastSel = '';
     app.on('select', () => {
-      renderProps();
+      // Kontext: mit Auswahl Details zeigen, ohne Auswahl die gewählte Ansicht
+      const key = [...app.sel].sort().join(',');
+      if (key !== lastSel) {
+        lastSel = key;
+        showRightView(app.sel.size ? 'props' : panels.view);
+      } else if (rightView === 'props') renderProps();
       renderObjects();
       renderSelBar();
       if (app.overlay.sight) renderLegend();
+      if (LLR.classUI) LLR.classUI.onSelect();
     });
     app.on('history', syncHistory);
     app.on('prefs', () => {
-      syncSnapPop();
+      syncViewPop();
       renderSelBar();
-      renderChecks();
-      renderProps();
+      if (rightView === 'checks') renderChecks();
+      else renderProps();
       renderLegend();
     });
     app.on('analysis', () => {
-      renderChecks();
-      const o = app.selectedObjects();
-      if (o.length === 1 && (A.isTable(o[0]) || o[0].type === 'wheelchair')) renderProps();
+      if (app.drag && app.drag.moved) return;
+      if (rightView === 'checks') renderChecks();
+      else {
+        const o = app.selectedObjects();
+        if (o.length === 1 && (A.isTable(o[0]) || o[0].type === 'wheelchair' || o[0].learner)) renderProps();
+      }
+      if (LLR.classUI) LLR.classUI.onAnalysis();
     });
     app.on('overlay', () => {
-      renderProps();
-      renderChecks();
+      if (rightView === 'checks') renderChecks();
+      else renderProps();
       renderLegend();
       syncTools();
+      syncNeeds();
     });
     app.on('mode', syncTools);
     app.on('measure', syncTools);
@@ -1664,11 +1964,17 @@
         if (i) i.focus();
       }
     });
+    app.on('phase', () => {
+      if (LLR.classUI) LLR.classUI.render();
+      if (rightView === 'checks') renderChecks();
+      else renderProps();
+      renderLegend();
+    });
 
     try {
       if (!localStorage.getItem(KEY_SEEN)) {
         localStorage.setItem(KEY_SEEN, '1');
-        if (!shared) openHelp();
+        if (!shared && !localStorage.getItem('llr2d.seen.v1')) openHelp();
       }
     } catch (e) {
       /* ohne Speicher keine Hilfe beim Start */
@@ -1683,14 +1989,43 @@
     bindChecks();
     bindLegend();
     bindTools();
-    bindSnapPop();
+    bindViewPop();
     bindTabs();
     bindDrawers();
     bindFile();
+    if (LLR.classUI) LLR.classUI.bind();
   }
 
-  LLR.ui = { toast, openDialog, confirmDlg, exportPNG, printPlan, openShare, packDoc, unpackDoc, buildExportSVG };
+  LLR.ui = {
+    toast,
+    openDialog,
+    confirmDlg,
+    exportPNG,
+    printPlan,
+    openShare,
+    packDoc,
+    unpackDoc,
+    buildExportSVG,
+    planPreview,
+    setLens,
+    syncHint,
+    syncNeeds,
+    openLibTab,
+    closeDrawers,
+    showDetails,
+    ensureVisible,
+    mini,
+    sglyph,
+    icon,
+    m1,
+    panels,
+    savePanels,
+    mobile,
+    renderProps,
+    renderChecks,
+  };
 
+  // Start erst, wenn alle Skripte (auch js/ui-class.js) geladen sind
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  else setTimeout(init);
 })((window.LLR = window.LLR || {}));
