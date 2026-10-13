@@ -38,18 +38,30 @@ Tablet und Smartphone.
   am Raster (Rastergröße 10–100 cm) schnell an- und ausschalten.
 - **Rollstuhl-Check** (vereinfacht nach DIN 18040-1): befahrbare Flächen ab der Tür
   (Durchgang ≥ 90 cm), Flächen zum Wenden (Ø 150 cm), zu enge Bereiche,
-  Rollstuhlplätze an Tischkanten. Zusätzlich ein Rollstuhl als Prüfobjekt
-  (70 × 120 cm, mit Wendekreis), der rot wird, sobald er aneckt.
-- **Abstände & Messen**: Abstände des gewählten Objekts zu den Nachbarn
-  (grün ≥ 90 cm) und ein Messwerkzeug, das an Kanten einrastet.
+  Rollstuhlplätze an Tischkanten – jeweils mit **Wegprüfung** von der Tür. Plätze,
+  die erst nach Wegstellen eines Stuhls frei werden, zählen nur, wenn mit allen
+  übrigen Stühlen ein Weg dorthin führt. Ein angetippter Tisch zeigt den Weg und
+  den wegzustellenden Stuhl im Plan. Zusätzlich ein Test-Rollstuhl
+  (70 × 120 cm, mit Wendekreis), der rot wird, sobald er aneckt, und seinen Weg
+  von der Tür anzeigt.
 - **Sicht-Check**: zeigt je Sitzplatz, ob Tafel, Wandbildschirm oder Beamer-Fläche
-  direkt, seitlich oder gar nicht im Blick sind (Regale/Trennwände verdecken).
-  Ein angetippter Sitzplatz zeigt seinen **Sichtkegel**: Blickfeld, sichtbare und
-  verdeckte Teile jeder Präsentationsfläche, Entfernung und nötige Kopfdrehung.
+  direkt, nur mit seitlich gedrehtem Kopf oder gar nicht im Blick sind
+  (Regale/Trennwände verdecken) und ob **Personen in der Sichtachse** sitzen.
+  Ein angetippter Sitzplatz zeigt seinen **Sichtkegel**: Blickfeld, sichtbare,
+  verdeckte und durch Personen eingeschränkte Teile jeder Präsentationsfläche,
+  Entfernung und nötige Kopfdrehung.
+- **Prüfen & Zählen** als aufklappbare Abschnitte: Ergebnisse stehen im
+  jeweiligen Abschnitt, der Schalter „Im Plan“ blendet die Darstellung ein und aus.
+- **Ansicht im Plan**: Abstände des gewählten Objekts zu den Nachbarn
+  (grün ≥ 90 cm), Raummaße am Rand und Raster lassen sich getrennt ein- und
+  ausblenden; dazu ein Messwerkzeug, das an Kanten einrastet.
 - **Speichern & Teilen**: automatische Sicherung im Browser, mehrere Pläne,
   Export/Import als `.json`, Teilen-Link (der Plan steckt komplett im Link),
   PNG-Export und Druckansicht (A4, auch als PDF).
-- **Bedienung** mit Maus, Touch (Ziehen, Pinch-Zoom) und Tastatur.
+- **Bedienung** mit Maus, Touch (Ziehen, Pinch-Zoom) und Tastatur. Am Computer
+  lassen sich beide Seitenleisten einklappen; auf dem Tablet erscheinen sie als
+  Schubladen, auf dem Smartphone die Eigenschaften als Blatt von unten
+  (Details/Prüfen, nach unten wegwischen).
 
 ## Auf GitHub Pages veröffentlichen
 
@@ -90,3 +102,8 @@ python3 -m http.server 8000
 - Die Raummaße (6,30 × 8,00 m) und die Positionen der festen Einrichtung sind aus
   Fotos geschätzt. Bitte vor Ort nachmessen und in den Einstellungen anpassen.
 - Der Rollstuhl-Check ist ein vereinfachtes Modell und ersetzt keine fachliche Prüfung.
+- Sicht-Check: Eine sitzende Person wird als Kopf von ca. 32 cm Breite angenommen
+  (Augenhöhe sitzend 1,20 m, Kopfoberkante 1,35 m, Präsentationsfläche 0,90–2,00 m).
+  Je näher eine Person am eigenen Platz sitzt, desto mehr der Fläche verdeckt sie.
+  Ab 25 % verdeckter Fläche gilt die Sicht als eingeschränkt. Die Annahme lässt sich
+  im Abschnitt „Sicht“ abschalten; die Werte stehen in `js/analysis.js`.

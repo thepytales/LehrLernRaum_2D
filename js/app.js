@@ -8,10 +8,26 @@
   const KEY_AUTO = 'llr2d.autosave.v1';
   const WALL = 20;
   /* Bedien-Einstellungen: gelten sofort und gehören nicht zum Rückgängig-Verlauf */
-  const PREF_KEYS = ['snap', 'carryChairs', 'angleSnap', 'grid', 'gridSnap'];
+  const PREF_KEYS = ['snap', 'carryChairs', 'angleSnap', 'grid', 'gridSnap', 'sightPersons'];
   const GRID_MAJOR = { 10: 50, 20: 100, 25: 100, 50: 100, 100: 500 };
   const HATCH = '<pattern id="hatch-wall" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#5B6168"/><line x1="0" y1="0" x2="0" y2="8" stroke="#6E747B" stroke-width="3"/></pattern>';
-  const SIGHT_COLORS = { good: '#2F9E44', side: '#F59F00', back: '#E03131', none: '#E03131', hidden: '#E03131' };
+  const SIGHT_COLORS = { good: '#2F9E44', side: '#F59F00', person: '#F59F00', back: '#E03131', none: '#E03131', hidden: '#E03131' };
+  const ROUTE_NOW = '#1F6FEB';
+  const ROUTE_MOVE = '#E67700';
+  const ROUTE_CHAIR = '#2F9E44';
+
+  /* Sichtmarke eines Sitzplatzes (Mittelpunkt 0,0, Radius 7). Die Zeichen
+     sind bewusst richtungslos: Haken = direkt, ! = seitlich (Kopf drehen),
+     Person = jemand sitzt im Blickfeld, Kreuz = kein Blick. */
+  LLR.sightGlyph = (cat) => {
+    let g = `<circle r="7" fill="${SIGHT_COLORS[cat]}" stroke="#fff" stroke-width="1.6"/>`;
+    if (cat === 'good') g += '<path d="M-3.2 0 l2.2 2.4 l4.2 -4.6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>';
+    else if (cat === 'side') g += '<path d="M0 -3.8 v3.9" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cy="3.2" r="1.1" fill="#fff"/>';
+    else if (cat === 'person') g += '<circle cy="-1.9" r="1.8" fill="#fff"/><path d="M-3.6 4 a3.6 3.2 0 0 1 7.2 0 z" fill="#fff"/>';
+    else g += '<path d="M-2.6 -2.6 l5.2 5.2 m0 -5.2 l-5.2 5.2" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>';
+    return g;
+  };
+  LLR.SIGHT_COLORS = SIGHT_COLORS;
 
   const app = {
     doc: null,
@@ -21,7 +37,9 @@
     view: { x: 0, y: 0, w: 800, h: 900 },
     mode: 'select',
     multi: false,
-    overlay: { access: false, sight: false, grid: true, dims: true },
+    overlay: { access: false, sight: false, grid: true, dims: true, roomDims: true },
+    /* Analysen, die das Panel braucht, auch wenn sie im Plan ausgeblendet sind */
+    need: { access: false },
     measure: null,
     drag: null,
     pointers: new Map(),
@@ -259,7 +277,7 @@
     };
     w += band(0, -WALL, W, WALL, 0, -1) + band(0, L, W, WALL, 0, 1) + band(-WALL, 0, WALL, L, -1, 0) + band(W, 0, WALL, L, 1, 0);
     w += band(-WALL, -WALL, WALL, WALL, -1, -1) + band(W, -WALL, WALL, WALL, 1, -1) + band(-WALL, L, WALL, WALL, -1, 1) + band(W, L, WALL, WALL, 1, 1);
-    if (app.overlay.dims) {
+    if (app.overlay.roomDims) {
       const ty = -WALL - 22;
       const lx = -WALL - 22;
       w += `<g font-family="system-ui, sans-serif" font-size="15" fill="#495057" text-anchor="middle">`;
@@ -366,17 +384,25 @@
 
   /* ---------- Analyse-Ebene ---------- */
   let anaTimer = null;
+  let fullTimer = null;
   let anaLast = 0;
+  /* Während des Ziehens läuft die Rollstuhl-Analyse gedrosselt und ohne die
+     aufwendigere Suche nach Plätzen hinter Stühlen; kurz danach vollständig. */
   app.scheduleAnalysis = function (throttle) {
-    if (!app.overlay.access) {
+    if (!app.overlay.access && !app.need.access) {
+      clearTimeout(anaTimer);
+      clearTimeout(fullTimer);
+      anaTimer = fullTimer = null;
       app.access = null;
       app.els.analysis.innerHTML = '';
       return;
     }
-    const run = () => {
+    const run = (quick) => {
       anaTimer = null;
+      clearTimeout(fullTimer);
+      fullTimer = quick ? setTimeout(() => run(false), 450) : null;
       anaLast = performance.now();
-      app.access = A.access(app.doc);
+      app.access = A.access(app.doc, { image: app.overlay.access, quick });
       const im = app.access.image;
       app.els.analysis.innerHTML = im ? `<image href="${im.url}" x="0" y="0" width="${im.w}" height="${im.h}" preserveAspectRatio="none" opacity="1"/>` : '';
       app.renderMarks();
@@ -385,20 +411,83 @@
     if (!throttle) {
       clearTimeout(anaTimer);
       anaTimer = null;
-      run();
+      run(false);
       return;
     }
     if (anaTimer) return;
     const wait = Math.max(0, throttle - (performance.now() - anaLast));
-    anaTimer = setTimeout(run, wait);
+    anaTimer = setTimeout(() => run(true), wait);
   };
 
-  /* Markierungen: Rollstuhlplätze und Sicht */
+  app.setNeed = function (key, val) {
+    if (app.need[key] === !!val) return;
+    app.need[key] = !!val;
+    if (key === 'access') app.scheduleAnalysis(0);
+  };
+
+  /* Sicht-Analyse, zwischengespeichert bis sich der Plan ändert */
+  let sightMemo = { key: null, res: null };
+  app.getSight = function () {
+    const key = app.serialize();
+    if (sightMemo.key !== key) sightMemo = { key, res: A.sight(app.doc) };
+    return sightMemo.res;
+  };
+
+  /* Weg von der Tür als gestrichelte Linie mit weißem Rand */
+  function routeMarkup(pts, color, k) {
+    if (!pts || pts.length < 2) return '';
+    const d = pts.map((p) => `${f(p.x)},${f(p.y)}`).join(' ');
+    const end = pts[pts.length - 1];
+    return (
+      `<polyline points="${d}" fill="none" stroke="#fff" stroke-opacity="0.9" stroke-width="${f(7 * k)}" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<polyline points="${d}" fill="none" stroke="${color}" stroke-width="${f(3 * k)}" stroke-dasharray="${f(8 * k)} ${f(6 * k)}" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<circle cx="${f(end.x)}" cy="${f(end.y)}" r="${f(5 * k)}" fill="${color}" stroke="#fff" stroke-width="${f(1.5 * k)}"/>`
+    );
+  }
+
+  /* Stühle, die für einen Rollstuhlplatz weggestellt werden müssen; das
+     Etikett steht auf der vom Tisch abgewandten Seite */
+  function moveMarkup(ids, table, k) {
+    let h = '';
+    for (const id of ids) {
+      const o = byId(id);
+      if (!o) continue;
+      for (const poly of app.worldParts(o)) h += `<path d="${G.polyPath(poly)}" fill="${ROUTE_MOVE}" fill-opacity="0.28" stroke="${ROUTE_MOVE}" stroke-width="${f(2.2 * k)}" stroke-dasharray="${f(5 * k)} ${f(3 * k)}"/>`;
+      const away = G.norm(G.sub(o, table));
+      h += chip(G.add(o, G.mul(away, 30 + 20 * k)), k, 'wegstellen', ROUTE_MOVE);
+    }
+    return h;
+  }
+
+  /* Markierungen: Rollstuhlplätze, Wege und Sicht */
   app.renderMarks = function () {
     const k = app.px();
     let h = '';
     if (app.overlay.access && app.access) {
-      for (const t of app.access.tables) {
+      const a = app.access;
+      // Weg von der Tür zu den Rollstuhlplätzen der ausgewählten Tische
+      const selTables = new Set([...app.sel].filter((id) => {
+        const o = byId(id);
+        return o && isTable(o);
+      }));
+      // (sofort erreichbare Plätze alle, sonst nur der Platz mit den wenigsten Stühlen)
+      if (selTables.size && selTables.size <= 6) {
+        for (const t of a.tables) {
+          if (!selTables.has(t.id)) continue;
+          const now = t.spots.filter((s) => s.now);
+          const later = t.spots.filter((s) => !s.now).sort((x, y) => x.move.length - y.move.length || x.cells.length - y.cells.length);
+          if (now.length) for (const s of now) h += routeMarkup(a.route(s), ROUTE_NOW, k);
+          else if (later.length) h += routeMarkup(a.route(later[0]), ROUTE_MOVE, k) + moveMarkup(later[0].move, byId(t.id), k);
+        }
+      }
+      // Prüf-Rollstühle: Weg von der Tür oder Hinweis
+      for (const w of a.wheelchairs) {
+        const o = byId(w.id);
+        if (!o) continue;
+        if (w.ok) h += routeMarkup(a.route(w), ROUTE_CHAIR, k);
+        else h += chip({ x: o.x, y: o.y + (o.d || 120) / 2 + 16 * k }, k, 'Kein Weg von der Tür', '#C92A2A');
+      }
+      for (const t of a.tables) {
         for (const s of t.spots) {
           const p = s.anchor;
           const sc = s.now ? 1 : 0.72;
@@ -410,24 +499,14 @@
       }
     }
     if (app.overlay.sight) {
-      const sight = A.sight(app.doc);
-      app.sightResult = sight;
-      const col = SIGHT_COLORS;
+      const sight = app.getSight();
       // Sichtkegel nur für ausgewählte Sitzplätze, sonst wird es unübersichtlich
       const coneIds = [...app.sel].filter((id) => {
         const o = byId(id);
         return o && A.isSeat(o);
       });
       if (coneIds.length <= 8) for (const id of coneIds) h += coneMarkup(A.sightCone(app.doc, id), k);
-      for (const s of sight.seats) {
-        const c = col[s.cat];
-        h += `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="7" fill="${c}" stroke="#fff" stroke-width="1.6"/>`;
-        if (s.cat === 'good') h += `<path d="M${f(s.x - 3.2)} ${f(s.y)} l2.2 2.4 l4.2 -4.6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
-        else if (s.cat === 'side') h += `<path d="M${f(s.x - 3)} ${f(s.y)} h6 m-2.4 -2.6 l2.4 2.6 l-2.4 2.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-        else h += `<path d="M${f(s.x - 2.6)} ${f(s.y - 2.6)} l5.2 5.2 m0 -5.2 l-5.2 5.2" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>`;
-      }
-    } else {
-      app.sightResult = null;
+      for (const s of sight.seats) h += `<g transform="translate(${f(s.x)} ${f(s.y)})">${LLR.sightGlyph(s.cat)}</g>`;
     }
     app.els.marks.innerHTML = h;
   };
@@ -446,6 +525,13 @@
       h += `<path d="M${pt(e)} L${pt(a0)} A${R} ${R} 0 0 1 ${pt(a1)} Z" fill="#4DABF7" fill-opacity="0.16" stroke="#1C7ED6" stroke-width="${f(k)}" stroke-dasharray="${f(4 * k)} ${f(3 * k)}"/>`;
     }
     const views = cone.views.slice().sort((x, y) => (x === cone.best) - (y === cone.best));
+    // Personen, die im Blickfeld sitzen
+    const ring = new Set();
+    for (const v of views) if (v.cat !== 'hidden') v.persons.forEach((id) => ring.add(id));
+    for (const id of ring) {
+      const o = byId(id);
+      if (o) h += `<circle cx="${f(o.x)}" cy="${f(o.y)}" r="${A.PERSON_R + 4}" fill="${ROUTE_MOVE}" fill-opacity="0.16" stroke="${ROUTE_MOVE}" stroke-width="${f(1.8 * k)}" stroke-dasharray="${f(4 * k)} ${f(2.5 * k)}"/>`;
+    }
     for (const v of views) {
       const strong = v === cone.best;
       const c = SIGHT_COLORS[v.turn];
@@ -453,7 +539,8 @@
       for (const r of v.runs) {
         const p0 = G.lerp(v.s.a, v.s.b, r.t0);
         const p1 = G.lerp(v.s.a, v.s.b, r.t1);
-        if (r.vis) h += `<path d="M${pt(e)} L${pt(p0)} L${pt(p1)} Z" fill="${c}" fill-opacity="${op}"/>`;
+        if (r.st === 0) h += `<path d="M${pt(e)} L${pt(p0)} L${pt(p1)} Z" fill="${c}" fill-opacity="${op}"/>`;
+        else if (r.st === 1) h += `<path d="M${pt(e)} L${pt(p0)} L${pt(p1)} Z" fill="${ROUTE_MOVE}" fill-opacity="${f(op * 0.8)}" stroke="${ROUTE_MOVE}" stroke-width="${f(0.9 * k)}" stroke-dasharray="${f(2 * k)} ${f(2.5 * k)}" stroke-opacity="0.8"/>`;
         else h += `<path d="M${pt(e)} L${pt(p0)} L${pt(p1)} Z" fill="#E03131" fill-opacity="${f(op * 0.7)}" stroke="#E03131" stroke-width="${f(0.9 * k)}" stroke-dasharray="${f(3 * k)} ${f(3 * k)}" stroke-opacity="0.8"/>`;
       }
       const lc = v.cat === 'hidden' ? '#E03131' : c;
@@ -463,6 +550,7 @@
       let label = `${v.s.name} · ${fmtM(v.dist)}`;
       if (!cone.free) label += ` · ${Math.round(v.ang)}°`;
       if (v.frac < 0.999) label += ` · ${Math.round(v.frac * 100)} % sichtbar`;
+      if (v.person) label += ` · Person im Blick`;
       const m = G.lerp(e, v.s.p, 0.62);
       const wpx = label.length * 6.3 + 16;
       const bg = strong ? lc : '#ffffff';
@@ -656,23 +744,30 @@
   app.applyView = function () {
     const v = app.view;
     app.svg.setAttribute('viewBox', `${f(v.x)} ${f(v.y)} ${f(v.w)} ${f(v.h)}`);
+    app._lastW = app.svg.getBoundingClientRect().width || app._lastW;
     app.renderOverlay();
     app.emit('view');
   };
 
+  /* Größe der Bühne geändert (Fenster, Seitenleisten): solange der Raum
+     eingepasst ist, neu einpassen – sonst Maßstab und Mitte beibehalten */
   app.syncAspect = function () {
     if (!app.doc) return;
     const r = app.svg.getBoundingClientRect();
     if (!r.width || !r.height) return;
-    const v = app.view;
-    const cy = v.y + v.h / 2;
-    v.h = v.w * (r.height / r.width);
-    v.y = cy - v.h / 2;
-    if (!app._fitted) {
+    if (!app._fitted || app._autoFit) {
       app._fitted = true;
       app.fitView();
       return;
     }
+    const v = app.view;
+    const k = v.w / (app._lastW || r.width);
+    const cx = v.x + v.w / 2;
+    const cy = v.y + v.h / 2;
+    v.w = r.width * k;
+    v.h = r.height * k;
+    v.x = cx - v.w / 2;
+    v.y = cy - v.h / 2;
     app.applyView();
   };
 
@@ -696,6 +791,7 @@
     const h = (r.height || bh) * s;
     const offY = topPx * s;
     app.view = { x: bx + bw / 2 - w / 2, y: by - offY - (h - offY - bh) / 2, w, h };
+    app._autoFit = true;
     app.applyView();
   };
 
@@ -707,6 +803,7 @@
     v.y = pt.y - (pt.y - v.y) * s;
     v.w = nw;
     v.h *= s;
+    app._autoFit = false;
     app.applyView();
   };
 
@@ -1448,6 +1545,7 @@
     if (dr.hy) sides[dr.hy > 0 ? 'b' : 't'] = fit(dr.snap.l, dr.hy * dyC * dr.k0);
     app.applyRoomResize(dr.snap, sides);
     // Ansicht mitschieben, damit die gegenüberliegende Wand stehen bleibt
+    app._autoFit = false;
     app.view.x = dr.view0.x + sides.l;
     app.view.y = dr.view0.y + sides.t;
     app.renderRoom();
@@ -1472,6 +1570,7 @@
       const s = clamp(dr.d0 / d, 60 / v0.w, 6000 / v0.w);
       const r = app.svg.getBoundingClientRect();
       const k = (v0.w * s) / r.width;
+      app._autoFit = false;
       app.view = {
         w: v0.w * s,
         h: v0.h * s,
@@ -1491,6 +1590,7 @@
     }
     const p = app.toWorld(e.clientX, e.clientY);
     if (dr.kind === 'pan') {
+      app._autoFit = false;
       app.view.x = dr.view0.x - dxC * dr.k0;
       app.view.y = dr.view0.y - dyC * dr.k0;
       app.applyView();
@@ -1701,7 +1801,7 @@
 
   app.setOverlay = function (key, val) {
     app.overlay[key] = val;
-    if (key === 'grid' || key === 'dims') app.renderRoom();
+    if (key === 'grid' || key === 'roomDims') app.renderRoom();
     app.scheduleAnalysis(0);
     app.renderOverlay();
     app.emit('overlay');
