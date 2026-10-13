@@ -18,6 +18,7 @@
     carryChairs: true,
     grid: 50,
     gridSnap: false,
+    sightPersons: true,
   };
 
   LLR.DEFAULT_ROOM = { w: 630, l: 800 };

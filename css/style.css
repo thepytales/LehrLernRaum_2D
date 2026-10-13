@@ -105,7 +105,9 @@ svg use {
 .tabs svg,
 .mobile-bar svg,
 .chip svg,
-.check-row svg {
+.check-row svg,
+.acc-btn svg,
+.sub-head svg {
   width: 18px;
   height: 18px;
   fill: none;
@@ -233,6 +235,17 @@ svg use {
 .topbar > #btn-settings {
   margin-left: auto;
 }
+#btn-left[aria-expanded='false'],
+#btn-right[aria-expanded='false'] {
+  color: var(--muted);
+}
+#btn-left[aria-expanded='true'],
+#btn-right[aria-expanded='true'] {
+  color: var(--primary);
+}
+.phone-only {
+  display: none !important;
+}
 
 .menu {
   position: absolute;
@@ -269,13 +282,48 @@ svg use {
 /* ---------- Layout ---------- */
 .workspace {
   display: grid;
-  grid-template-columns: var(--left) 1fr var(--right);
+  grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
   height: calc(100% - var(--topbar));
+  transition: grid-template-columns 0.22s ease;
+}
+/* Seitenleisten eingeklappt (Computer) */
+.workspace.no-left {
+  grid-template-columns: 0 minmax(0, 1fr) var(--right);
+}
+.workspace.no-right {
+  grid-template-columns: var(--left) minmax(0, 1fr) 0;
+}
+.workspace.no-left.no-right {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
 }
 .panel {
   background: var(--panel);
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
+  min-width: 0;
+}
+@media (min-width: 901px) {
+  /* Inhalt behält beim Ein-/Ausklappen seine Breite und wird nur abgedeckt */
+  .panel-left > * {
+    min-width: calc(var(--left) - 20px);
+  }
+  .panel-right > * {
+    min-width: calc(var(--right) - 20px);
+  }
+  .workspace.no-left .panel-left,
+  .workspace.no-right .panel-right {
+    visibility: hidden;
+    border-width: 0;
+    transition: visibility 0s linear 0.22s;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace,
+  .panel-left,
+  .panel-right {
+    transition: none !important;
+  }
 }
 .panel-left {
   border-right: 1px solid var(--line);
@@ -543,6 +591,7 @@ svg use {
 .stage {
   position: relative;
   overflow: hidden;
+  container: stage / inline-size;
   background: var(--stage);
   background-image: radial-gradient(#d3d7dc 1px, transparent 1px);
   background-size: 18px 18px;
@@ -701,9 +750,50 @@ svg use {
   background: rgba(255, 255, 255, 0.96);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 8px 12px;
+  padding: 0;
   font-size: 12px;
   max-width: min(360px, calc(100% - 80px));
+  max-height: calc(100% - 90px);
+  overflow-y: auto;
+}
+.legend-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 7px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.legend-head:hover {
+  color: var(--text);
+}
+.legend-head .chev {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+.legend.collapsed .legend-head .chev {
+  transform: rotate(180deg);
+}
+.legend-body {
+  padding: 0 12px 8px;
+}
+.legend-body[hidden] {
+  display: none;
 }
 .legend[hidden] {
   display: none;
@@ -713,6 +803,25 @@ svg use {
   align-items: center;
   gap: 8px;
   margin: 3px 0;
+}
+.legend .row > span:last-child {
+  min-width: 0;
+}
+/* Legende links unten aufgeklappt: Auswahlleiste rechts neben den Zoom */
+.stage.has-legend .sel-bar {
+  left: auto;
+  right: 66px;
+  transform: none;
+}
+@container stage (max-width: 700px) {
+  .stage.has-legend .sel-bar {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+  .stage.has-sel .legend {
+    display: none;
+  }
 }
 .legend .sw {
   width: 16px;
@@ -725,6 +834,12 @@ svg use {
   width: 13px;
   height: 13px;
   border-radius: 50%;
+}
+.legend .sw.line {
+  height: 0;
+  border: 0;
+  border-top: 3px dashed currentColor;
+  border-radius: 0;
 }
 .legend .sw.cone {
   border: 0;
@@ -894,6 +1009,17 @@ svg use {
   display: block;
   color: var(--muted);
   font-size: 11.5px;
+}
+.toggle > span {
+  flex: 1;
+  min-width: 0;
+}
+.acc-body .toggle {
+  align-items: flex-start;
+  margin-top: 8px;
+}
+.acc-body .toggle input {
+  margin-top: 1px;
 }
 
 /* Prüfungen */
@@ -1068,6 +1194,161 @@ svg use {
   padding: 0 5px;
 }
 
+/* Aufklappbare Prüf-Abschnitte */
+.grp-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 16px 0 6px;
+}
+.sec-title + .grp-title {
+  margin-top: 4px;
+}
+.acc {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  margin-bottom: 8px;
+}
+.acc.on {
+  border-color: #b8c7ea;
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.acc-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 10px;
+}
+.acc-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px 6px 10px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text);
+}
+.acc-btn:hover .acc-title {
+  color: var(--primary);
+}
+.acc-btn svg {
+  width: 20px;
+  height: 20px;
+  color: var(--primary);
+}
+.acc-btn .chev {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transform: rotate(-90deg);
+  transition: transform 0.15s;
+}
+.acc.open .acc-btn .chev {
+  transform: none;
+}
+.acc-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.acc-title small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.acc-switch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  flex: none;
+}
+.acc-body {
+  padding: 2px 12px 12px;
+  border-top: 1px solid #f1f3f5;
+}
+.acc-body[hidden] {
+  display: none;
+}
+.acc-body > .stat-table:first-child,
+.acc-body > .check-row:first-child {
+  margin-top: 4px;
+}
+.acc-body .callout {
+  margin-top: 12px;
+}
+.switch-row.compact {
+  padding: 6px 10px;
+}
+.sub-block {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+.sub-block .desc {
+  margin: 4px 0 0;
+}
+.sub-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.sub-head svg {
+  width: 16px;
+  height: 16px;
+  color: var(--primary);
+}
+.sg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  vertical-align: -4px;
+  margin-right: 6px;
+  overflow: visible;
+}
+.legend .row .sg {
+  margin-right: 0;
+}
+.stat-table tr.grp td {
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.stat-table tr.sub td:first-child {
+  padding-left: 16px;
+}
+.seat-sum {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+details.tips summary {
+  cursor: pointer;
+  margin: -2px 0;
+  padding: 2px 0;
+}
+details.tips[open] summary {
+  margin-bottom: 4px;
+}
+
 /* ---------- Dialog ---------- */
 dialog {
   border: 0;
@@ -1227,15 +1508,18 @@ dialog::backdrop {
 }
 
 @media (max-width: 1080px) {
+  .brand-text span {
+    display: none;
+  }
+}
+/* Beschriftungen der Werkzeuge nur, wenn die Bühne breit genug ist */
+@container stage (max-width: 700px) {
   .tool span {
     display: none;
   }
   .tool {
     min-width: 40px;
     padding: 8px;
-  }
-  .brand-text span {
-    display: none;
   }
 }
 
@@ -1293,26 +1577,46 @@ dialog::backdrop {
   .panel-left .tabs {
     top: 53px;
   }
+  /* Tablet hochkant: Eigenschaften als Schublade von rechts */
   .panel-right {
     position: fixed;
-    left: 0;
+    top: 0;
     right: 0;
     bottom: 0;
-    max-height: 72dvh;
+    width: min(380px, 92vw);
     z-index: 40;
     border-left: 0;
-    border-radius: 16px 16px 0 0;
-    transform: translateY(102%);
+    transform: translateX(102%);
     transition: transform 0.22s ease;
-    box-shadow: 0 -8px 30px rgba(16, 24, 40, 0.2);
+    box-shadow: var(--shadow);
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
   .panel-right.open {
     transform: none;
   }
-  #props,
+  .panel-right[data-view='props'] #checks,
+  .panel-right[data-view='checks'] #props {
+    display: none;
+  }
   #checks {
-    scroll-margin-top: 60px;
+    border-top: 0;
+  }
+  .sheet-head {
+    gap: 8px;
+    padding: 8px 8px 8px 12px;
+  }
+  .sheet-head .grab {
+    display: none;
+  }
+  .sheet-tabs.seg {
+    display: flex;
+    flex: 1;
+    max-width: 280px;
+  }
+  .sheet-tabs button {
+    flex: 1;
+    padding: 7px 10px;
+    font-size: 13px;
   }
   .mobile-bar {
     display: flex !important;
@@ -1364,7 +1668,6 @@ dialog::backdrop {
     left: 8px;
     bottom: 8px;
     font-size: 11.5px;
-    padding: 6px 10px;
     max-width: calc(100% - 70px);
   }
   .sel-bar {
@@ -1381,6 +1684,74 @@ dialog::backdrop {
   }
   .field-grid {
     grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* ---------- Smartphone ---------- */
+@media (max-width: 600px) {
+  .hide-phone {
+    display: none !important;
+  }
+  .menu .phone-only {
+    display: flex !important;
+  }
+  .topbar {
+    gap: 4px;
+    padding: 0 6px;
+  }
+  .brand {
+    padding-right: 0;
+  }
+  /* Eigenschaften als Blatt von unten, am Griff nach unten wischen schließt */
+  .panel-right {
+    top: auto;
+    left: 0;
+    width: auto;
+    max-height: 78dvh;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(102%);
+    box-shadow: 0 -8px 30px rgba(16, 24, 40, 0.2);
+  }
+  .sheet-head {
+    padding-top: 16px;
+    touch-action: none;
+    border-radius: 16px 16px 0 0;
+  }
+  .sheet-head .grab {
+    display: block;
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 40px;
+    height: 4px;
+    margin-left: -20px;
+    border-radius: 4px;
+    background: var(--line-strong);
+  }
+  /* Werkzeugleiste in einer Zeile, bei Bedarf seitlich wischbar */
+  .tool-rail {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    right: 0;
+    left: 0;
+    top: 0;
+    max-width: none;
+    padding: 6px 8px 10px;
+    scrollbar-width: none;
+  }
+  .tool-rail::-webkit-scrollbar {
+    display: none;
+  }
+  .rail-group {
+    flex: none;
+    padding: 3px;
+  }
+  .tool {
+    min-width: 34px;
+    padding: 6px;
+  }
+  .legend {
+    max-width: calc(100% - 72px);
   }
 }
 

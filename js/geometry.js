@@ -273,8 +273,8 @@
     const v = new Int32Array(n);
     const g = new Float64Array(n);
     const out = new Float64Array(n);
-    const pass = (get, set, len) => {
-      for (let q = 0; q < len; q++) g[q] = get(q);
+    // eindimensionale Transformation von g[0..len) nach out
+    const pass = (len) => {
       let k = 0;
       v[0] = 0;
       z[0] = -INF;
@@ -295,15 +295,18 @@
         while (z[k + 1] < q) k++;
         out[q] = (q - v[k]) * (q - v[k]) + g[v[k]];
       }
-      for (let q = 0; q < len; q++) set(q, out[q]);
     };
     for (let i = 0; i < f.length; i++) if (f[i] > INF) f[i] = INF;
     for (let x = 0; x < nx; x++) {
-      pass((q) => f[q * nx + x], (q, val) => (f[q * nx + x] = val), ny);
+      for (let q = 0; q < ny; q++) g[q] = f[q * nx + x];
+      pass(ny);
+      for (let q = 0; q < ny; q++) f[q * nx + x] = out[q];
     }
     for (let y = 0; y < ny; y++) {
       const row = y * nx;
-      pass((q) => f[row + q], (q, val) => (f[row + q] = val), nx);
+      for (let q = 0; q < nx; q++) g[q] = f[row + q];
+      pass(nx);
+      for (let q = 0; q < nx; q++) f[row + q] = out[q];
     }
     return f;
   };
