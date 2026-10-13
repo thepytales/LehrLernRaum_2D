@@ -19,6 +19,7 @@
     grid: 50,
     gridSnap: false,
     sightPersons: true,
+    walk: 50,
   };
 
   LLR.DEFAULT_ROOM = { w: 630, l: 800 };

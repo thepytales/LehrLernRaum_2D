@@ -788,6 +788,779 @@
     return sectors.filter(Boolean);
   };
 
+  /* ---------- Laufraster für Personen ----------
+     Wie beim Rollstuhl-Check, aber für eine gehende Person: bequem begehbar
+     ist eine Zelle, wenn dort settings.walk (Standard 50 cm) frei sind;
+     seitlich durchquetschen geht ab 36 cm. Stühle, Hocker und Rollstühle
+     sind besetzt und zählen als Hindernis. */
+  A.walkGrid = function (doc) {
+    const S = doc.settings;
+    const W = doc.room.w;
+    const L = doc.room.l;
+    const g = Math.max(4, Math.ceil(Math.sqrt((W * L) / 30000)));
+    const NX = Math.ceil(W / g) + 2;
+    const NY = Math.ceil(L / g) + 2;
+    const N = NX * NY;
+    const cellX = (i) => (i - 1 + 0.5) * g;
+    const cellY = (j) => (j - 1 + 0.5) * g;
+    const cellPt = (k) => ({ x: cellX(k % NX), y: cellY(Math.floor(k / NX)) });
+    const cellAt = (p) => {
+      const i = Math.floor(p.x / g) + 1;
+      const j = Math.floor(p.y / g) + 1;
+      if (i < 1 || j < 1 || i > NX - 2 || j > NY - 2) return -1;
+      return j * NX + i;
+    };
+    const occ = new Uint8Array(N);
+    for (let i = 0; i < NX; i++) occ[i] = occ[(NY - 1) * NX + i] = 1;
+    for (let j = 0; j < NY; j++) occ[j * NX] = occ[j * NX + NX - 1] = 1;
+    for (const o of doc.objects) {
+      if (!A.isObstacle(o, S, false) && o.type !== 'wheelchair') continue;
+      // Stühle lassen sich beim Vorbeigehen etwas heranrücken: nur die Sitzfläche zählt
+      const soft = isMovableSeat(o) ? (S.chairGive === undefined ? 6 : S.chairGive) : 0;
+      for (const raw of A.worldParts(o, S)) {
+        const poly = soft ? G.inset(raw, soft) : raw;
+        const bb = G.bbox(poly);
+        const i0 = Math.max(1, Math.floor(bb.minX / g) + 1);
+        const i1 = Math.min(NX - 2, Math.ceil(bb.maxX / g) + 1);
+        const j0 = Math.max(1, Math.floor(bb.minY / g) + 1);
+        const j1 = Math.min(NY - 2, Math.ceil(bb.maxY / g) + 1);
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (G.pointInConvex(poly, { x: cellX(i), y: cellY(j) })) occ[j * NX + i] = 1;
+      }
+    }
+    const d2 = new Float64Array(N);
+    for (let k = 0; k < N; k++) d2[k] = occ[k] ? 0 : Infinity;
+    G.edt(d2, NX, NY);
+    const r = (S.walk || 50) / 2;
+    const rt = Math.min(r, (S.squeeze || 36) / 2);
+    // free = bequem begehbar, tight = seitlich durchquetschen (ab 36 cm)
+    const free = new Uint8Array(N);
+    const tight = new Uint8Array(N);
+    for (let k = 0; k < N; k++) {
+      if (occ[k]) continue;
+      const c = Math.sqrt(d2[k]) * g - g / 2;
+      if (c >= r) free[k] = 1;
+      if (c >= rt) tight[k] = 1;
+    }
+    return { g, NX, NY, N, occ, free, tight, cellPt, cellAt, r };
+  };
+
+  /* Kürzeste Wege im Laufraster (Dijkstra, 8 Nachbarn) ab mehreren Startzellen */
+  function heapPush(h, k, d) {
+    h.push({ k, d });
+    let i = h.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (h[p].d <= h[i].d) break;
+      [h[p], h[i]] = [h[i], h[p]];
+      i = p;
+    }
+  }
+  function heapPop(h) {
+    const top = h[0];
+    const last = h.pop();
+    if (h.length) {
+      h[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < h.length && h[l].d < h[m].d) m = l;
+        if (r < h.length && h[r].d < h[m].d) m = r;
+        if (m === i) break;
+        [h[m], h[i]] = [h[i], h[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+
+  /* Engstellen sind passierbar, kosten aber das Vierfache – Wege nutzen sie nur, wenn es nicht anders geht */
+  A.walkField = function (grid, seeds) {
+    const { N, NX, g, free, tight } = grid;
+    const dist = new Float64Array(N).fill(Infinity);
+    const parent = new Int32Array(N).fill(-1);
+    const h = [];
+    for (const k of seeds) {
+      if (k < 0 || !tight[k] || dist[k] === 0) continue;
+      dist[k] = 0;
+      heapPush(h, k, 0);
+    }
+    const nb = [
+      [1, g], [-1, g], [NX, g], [-NX, g],
+      [NX + 1, g * Math.SQRT2], [NX - 1, g * Math.SQRT2], [-NX + 1, g * Math.SQRT2], [-NX - 1, g * Math.SQRT2],
+    ];
+    while (h.length) {
+      const { k, d } = heapPop(h);
+      if (d > dist[k]) continue;
+      for (const [o, c] of nb) {
+        const m = k + o;
+        if (!tight[m]) continue;
+        const nd = d + (free[m] ? c : c * 4);
+        if (nd < dist[m]) {
+          dist[m] = nd;
+          parent[m] = k;
+          heapPush(h, m, nd);
+        }
+      }
+    }
+    return { dist, parent };
+  };
+
+  /* Startzellen um einen Punkt (nächste freie Zellen im Umkreis) */
+  A.seedsNear = function (grid, p, maxR) {
+    const { g, NX, NY, tight: free, cellPt } = grid;
+    const ci = Math.floor(p.x / g) + 1;
+    const cj = Math.floor(p.y / g) + 1;
+    for (let rr = 0; rr <= (maxR || 80); rr += g) {
+      const rc = Math.ceil(rr / g);
+      const out = [];
+      for (let j = Math.max(1, cj - rc); j <= Math.min(NY - 2, cj + rc); j++) {
+        for (let i = Math.max(1, ci - rc); i <= Math.min(NX - 2, ci + rc); i++) {
+          const k = j * NX + i;
+          if (free[k] && G.dist(cellPt(k), p) <= rr + g) out.push(k);
+        }
+      }
+      if (out.length) return out;
+    }
+    return [];
+  };
+
+  /* Bester erreichbarer Standplatz neben einem Sitz (Umkreis R) */
+  A.reachSeat = function (grid, field, p, R) {
+    const { g, NX, NY, tight: free, cellPt } = grid;
+    const rc = Math.ceil(R / g);
+    const ci = Math.floor(p.x / g) + 1;
+    const cj = Math.floor(p.y / g) + 1;
+    let best = -1;
+    let bd = Infinity;
+    for (let j = Math.max(1, cj - rc); j <= Math.min(NY - 2, cj + rc); j++) {
+      for (let i = Math.max(1, ci - rc); i <= Math.min(NX - 2, ci + rc); i++) {
+        const k = j * NX + i;
+        if (!free[k] || field.dist[k] === Infinity) continue;
+        if (G.dist(cellPt(k), p) > R) continue;
+        if (field.dist[k] < bd) {
+          bd = field.dist[k];
+          best = k;
+        }
+      }
+    }
+    if (best < 0) return null;
+    // Länge des Wegs und ob er durch eine Engstelle führt
+    let len = 0;
+    let squeeze = false;
+    for (let c = best; field.parent[c] !== -1; c = field.parent[c]) {
+      len += G.dist(cellPt(c), cellPt(field.parent[c]));
+      if (!grid.free[c]) squeeze = true;
+    }
+    return { k: best, d: len, squeeze };
+  };
+
+  /* Weg als geglättete Linie (Start → Zelle k → Ziel) */
+  A.walkRoute = function (grid, field, k, start, end) {
+    const { tight: free, cellPt, cellAt, g } = grid;
+    const cells = [];
+    for (let c = k; c !== -1; c = field.parent[c]) cells.push(c);
+    cells.reverse();
+    const pts = cells.map(cellPt);
+    const los = (a, b) => {
+      const n = Math.ceil(G.dist(a, b) / (g / 2));
+      for (let s = 1; s < n; s++) {
+        const c = cellAt(G.lerp(a, b, s / n));
+        if (c < 0 || !free[c]) return false;
+      }
+      return true;
+    };
+    const out = [pts[0]];
+    let i = 0;
+    while (i < pts.length - 1) {
+      let j = i + 1;
+      while (j + 1 < pts.length && los(pts[i], pts[j + 1])) j++;
+      out.push(pts[j]);
+      i = j;
+    }
+    if (start && G.dist(start, out[0]) > 1) out.unshift(start);
+    if (end && G.dist(end, out[out.length - 1]) > 1) out.push(end);
+    return out;
+  };
+
+  const seatRadius = (o, S) => {
+    let r = 0;
+    for (const p of A.worldParts(o, S)) for (const q of p) r = Math.max(r, G.dist(q, o));
+    return r;
+  };
+  const faceDir = (o) => G.rot({ x: 0, y: -1 }, o.rot || 0);
+  /* Winkel zwischen Blickrichtung eines Platzes und einer Richtung (Hocker: frei drehbar) */
+  const turnTo = (o, p) => (o.type === 'stool' ? 0 : Math.abs(G.normAngle(G.angle(G.sub(p, o)) - G.angle(faceDir(o)))));
+
+  /* ---------- Lehrkraft-Check ----------
+     Laufwege der Lehrkraft zu jedem Platz und Blickkontakt (sieht die
+     Lehrkraft das Gesicht?). Standorte sind Objekte vom Typ „teacher“;
+     ohne solche wird ein Standort vor der Tafel angenommen. */
+  /* Standort vor der Tafel: von den Punkten 0,9–2,6 m vor der Fläche der,
+     von dem aus die meisten Plätze erreichbar sind */
+  A.teacherDefault = function (doc, grid) {
+    const s = A.surfaces(doc).find((x) => doc.objects.find((o) => o.id === x.id && o.type === 'iat')) || A.surfaces(doc)[0];
+    const W = doc.room.w;
+    const L = doc.room.l;
+    const clampP = (p) => ({ x: Math.max(40, Math.min(W - 40, p.x)), y: Math.max(40, Math.min(L - 40, p.y)) });
+    // Die Normale einer Präsentationsfläche zeigt in den Raum
+    const cands = s ? [95, 140, 190, 260].map((d) => clampP(G.add(s.p, G.mul(s.n, d)))) : [clampP({ x: W / 2, y: 120 })];
+    if (!grid || cands.length === 1) return cands[0];
+    const seats = doc.objects.filter(A.isSeat);
+    let best = null;
+    for (const p of cands) {
+      const seeds = A.seedsNear(grid, p, 60);
+      if (!seeds.length) continue;
+      const fd = A.walkField(grid, seeds);
+      const n = seats.filter((o) => A.reachSeat(grid, fd, o, seatRadius(o, doc.settings) + 40)).length;
+      if (!best || n > best.n) best = { p, n };
+      if (n === seats.length) break;
+    }
+    return best ? best.p : cands[0];
+  };
+
+  A.teacher = function (doc, opts) {
+    opts = opts || {};
+    const S = doc.settings;
+    const grid = A.walkGrid(doc);
+    const marks = doc.objects.filter((o) => o.type === 'teacher');
+    const positions = marks.length ? marks.map((o) => ({ id: o.id, x: o.x, y: o.y, rot: o.rot || 0 })) : [Object.assign({ id: null, implicit: true }, A.teacherDefault(doc, grid))];
+    const fields = positions.map((p) => {
+      const seeds = A.seedsNear(grid, p, 90);
+      return { p, seeds, field: A.walkField(grid, seeds) };
+    });
+    const blockers = sightBlockers(doc);
+    const LIMIT = S.teacherWalk || 700;
+    const seats = [];
+    for (const o of doc.objects) {
+      if (!A.isSeat(o)) continue;
+      // Standplatz neben dem Platz, sonst gegenüber über den Tisch hinweg
+      const R = seatRadius(o, S) + 40;
+      let reach = null;
+      for (const [rad, across] of [[R, false], [R + 80, true]]) {
+        fields.forEach((fd, i) => {
+          if (!fd.seeds.length) return;
+          const r = A.reachSeat(grid, fd.field, o, rad);
+          if (r && (!reach || r.d < reach.d)) reach = Object.assign(r, { pi: i, across });
+        });
+        if (reach) break;
+      }
+      // Blickkontakt: bester Standort (Gesicht vor Profil vor Rücken)
+      let eye = null;
+      positions.forEach((p, i) => {
+        const hidden = blocked(o, p, blockers);
+        const ang = turnTo(o, p);
+        const kind = hidden ? 'blocked' : ang <= 60 ? 'face' : ang <= 110 ? 'profile' : 'back';
+        const rank = { face: 0, profile: 1, back: 2, blocked: 3 }[kind];
+        const d = G.dist(o, p);
+        if (!eye || rank < eye.rank || (rank === eye.rank && d < eye.d)) eye = { kind, rank, ang, d, pi: i };
+      });
+      let cat = 'good';
+      if (!reach || eye.kind === 'blocked') cat = 'none';
+      else if (eye.kind === 'back') cat = 'back';
+      else if (eye.kind === 'profile' || reach.d > LIMIT || reach.squeeze || reach.across) cat = 'side';
+      seats.push({ id: o.id, x: o.x, y: o.y, reach, eye, cat, walk: reach ? reach.d : Infinity });
+    }
+    const reached = seats.filter((s) => s.reach);
+    const walks = reached.map((s) => s.walk);
+    const n = (k) => seats.filter((s) => s.eye && s.eye.kind === k).length;
+    const res = {
+      grid,
+      positions,
+      implicit: !marks.length,
+      seats,
+      reachable: reached.length,
+      far: reached.filter((s) => s.walk > LIMIT).length,
+      tight: reached.filter((s) => s.reach.squeeze).length,
+      across: reached.filter((s) => s.reach.across).length,
+      limit: LIMIT,
+      avgWalk: walks.length ? walks.reduce((a, b) => a + b, 0) / walks.length : 0,
+      maxWalk: walks.length ? Math.max(...walks) : 0,
+      face: n('face'),
+      profile: n('profile'),
+      back: n('back'),
+      hidden: n('blocked'),
+      stuck: fields.some((fd) => !fd.seeds.length),
+    };
+    res.route = (seatId) => {
+      const s = seats.find((x) => x.id === seatId);
+      if (!s || !s.reach) return null;
+      const fd = fields[s.reach.pi];
+      const o = doc.objects.find((x) => x.id === seatId);
+      return A.walkRoute(grid, fd.field, s.reach.k, fd.p, o);
+    };
+    if (opts.image !== false && typeof document !== 'undefined') {
+      // Reichweite der Lehrkraft: je dunkler, desto näher
+      const { NX, NY, free } = grid;
+      const nx = NX - 2;
+      const ny = NY - 2;
+      const cv = document.createElement('canvas');
+      cv.width = nx;
+      cv.height = ny;
+      const ctx = cv.getContext('2d');
+      const img = ctx.createImageData(nx, ny);
+      for (let j = 1; j <= ny; j++) {
+        for (let i = 1; i <= nx; i++) {
+          const k = j * NX + i;
+          if (!free[k]) continue;
+          let d = Infinity;
+          for (const fd of fields) d = Math.min(d, fd.field.dist[k]);
+          if (d === Infinity) continue;
+          const t = Math.min(1, d / (LIMIT * 1.3));
+          const q = ((j - 1) * nx + (i - 1)) * 4;
+          img.data[q] = 12;
+          img.data[q + 1] = 133;
+          img.data[q + 2] = 153;
+          img.data[q + 3] = Math.round(95 - 70 * t);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      res.image = { url: cv.toDataURL(), w: nx * grid.g, h: ny * grid.g };
+    }
+    return res;
+  };
+
+  /* ---------- Reiz- & Ruhe-Check ----------
+     Bewertet jeden Platz nach möglichen Störquellen: Nähe zur Tür, zur
+     Lounge, Laufwege von Mitschülerinnen und Mitschülern hinter dem Platz,
+     Gedränge, Blick aus dem Fenster und Spiegelungen auf den
+     Präsentationsflächen. Hohe Möbel (Regale, Trennwände) dämpfen. */
+  const LOUNGE = { sofa2: 1, sofaCorner: 1, beanbag: 1 };
+  const QUIET = /ruh|rückzug|still|leise|entspann/i;
+
+  /* Fenster als Strecken an der Wand */
+  A.windows = (doc) =>
+    doc.objects
+      .filter((o) => o.type === 'window')
+      .map((o) => {
+        const w = o.w || 180;
+        const e = G.toWorld([{ x: -w / 2, y: 0 }, { x: w / 2, y: 0 }], o);
+        return { id: o.id, a: e[0], b: e[1], c: { x: o.x, y: o.y } };
+      });
+
+  const rayHitsSeg = (p, dir, a, b) => {
+    const s = G.sub(b, a);
+    const den = G.cross(dir, s);
+    if (Math.abs(den) < 1e-9) return null;
+    const ap = G.sub(a, p);
+    const t = G.cross(ap, s) / den;
+    const u = G.cross(ap, dir) / den;
+    return t > 1 && u >= 0 && u <= 1 ? t : null;
+  };
+
+  /* Spiegelung: Fällt in der Fläche s von Platz o aus das Spiegelbild eines Fensters? */
+  A.glare = function (o, s, wins) {
+    const hits = [];
+    for (let i = 0; i <= 6; i++) {
+      const P = G.lerp(s.a, s.b, 0.08 + (0.84 * i) / 6);
+      const d = G.norm(G.sub(P, o));
+      const n = s.n;
+      const r = G.sub(d, G.mul(n, 2 * G.dot(d, n)));
+      for (const w of wins) {
+        const t = rayHitsSeg(P, r, w.a, w.b);
+        if (t !== null) hits.push({ P, w, Q: G.add(P, G.mul(r, t)) });
+      }
+    }
+    return hits;
+  };
+
+  A.calm = function (doc) {
+    const S = doc.settings;
+    const grid = A.walkGrid(doc);
+    const seatsO = doc.objects.filter(A.isSeat);
+    const doors = doc.objects.filter((o) => o.type === 'door');
+    const doorPts = doors.map((d) => G.add(d, G.mul(G.rot({ x: 0, y: -1 }, d.rot || 0), 35)));
+    const seeds = [];
+    for (const p of doorPts) seeds.push(...A.seedsNear(grid, p, 90));
+    const field = A.walkField(grid, seeds);
+    const blockers = sightBlockers(doc);
+    const lounge = doc.objects.filter((o) => LOUNGE[o.type]);
+    const zones = doc.objects.filter((o) => T[o.type].kind === 'zone' && QUIET.test(o.label || ''));
+    const wins = A.windows(doc);
+    const surfaces = A.surfaces(doc);
+    /* Wege von der Tür zu allen Plätzen */
+    const paths = new Map();
+    for (const o of seatsO) {
+      const r = A.reachSeat(grid, field, o, seatRadius(o, S) + 40) || A.reachSeat(grid, field, o, seatRadius(o, S) + 120);
+      if (!r) continue;
+      const cells = [];
+      for (let c = r.k; c !== -1; c = field.parent[c]) cells.push(c);
+      paths.set(o.id, { cells, walk: r.d, pts: null, k: r.k });
+    }
+    const near = (o, rad) => {
+      const out = new Set();
+      const { g, NX, NY, cellPt } = grid;
+      const rc = Math.ceil(rad / g);
+      const ci = Math.floor(o.x / g) + 1;
+      const cj = Math.floor(o.y / g) + 1;
+      for (let j = Math.max(1, cj - rc); j <= Math.min(NY - 2, cj + rc); j++) {
+        for (let i = Math.max(1, ci - rc); i <= Math.min(NX - 2, ci + rc); i++) {
+          const k = j * NX + i;
+          if (G.dist(cellPt(k), o) <= rad) out.add(k);
+        }
+      }
+      return out;
+    };
+    const others = Math.max(1, seatsO.length - 1);
+    const seats = [];
+    const shield = (o, p) => (blocked(o, p, blockers) ? 0.5 : 1);
+    for (const o of seatsO) {
+      const factors = [];
+      const add = (key, label, pts, detail, at) => {
+        if (pts > 0.5 || pts < -0.5) factors.push({ key, label, pts: Math.round(pts), detail, at });
+      };
+      // Tür
+      let dd = Infinity;
+      let dp = null;
+      doors.forEach((d, i) => {
+        const x = G.dist(o, doorPts[i]);
+        if (x < dd) {
+          dd = x;
+          dp = doorPts[i];
+        }
+      });
+      if (dp) {
+        const v = Math.max(0, Math.min(1, (380 - dd) / 260)) * 30 * shield(o, dp);
+        add('door', 'Tür in der Nähe', v, `${(dd / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, dp);
+      }
+      // Lounge
+      let ld = Infinity;
+      let lp = null;
+      for (const l of lounge) {
+        for (const poly of A.worldParts(l, S)) {
+          const x = pointPolyDist(o, poly);
+          if (x < ld) {
+            ld = x;
+            lp = { x: l.x, y: l.y };
+          }
+        }
+      }
+      if (lp) add('lounge', 'Lounge in der Nähe', Math.max(0, Math.min(1, (300 - ld) / 220)) * 20 * shield(o, lp), `${(ld / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, lp);
+      // Laufwege anderer hinter oder neben dem Platz
+      const around = near(o, seatRadius(o, S) + 30);
+      let passers = 0;
+      for (const [id, pth] of paths) {
+        if (id === o.id) continue;
+        if (pth.cells.some((c) => around.has(c))) passers++;
+      }
+      const share = passers / others;
+      add('traffic', 'Laufweg anderer am Platz vorbei', Math.min(1, share / 0.35) * 25, `${passers} von ${others}`);
+      // Gedränge: andere Plätze in Armlänge
+      const crowd = seatsO.filter((x) => x !== o && G.dist(x, o) < 115).length;
+      add('crowd', 'Viele Plätze direkt daneben', Math.max(0, Math.min(1, (crowd - 2) / 3)) * 15, `${crowd} Nachbarplätze`);
+      // Blick aus dem Fenster
+      let wv = null;
+      for (const w of wins) {
+        const ang = turnTo(o, w.c);
+        const d = G.dist(o, w.c);
+        if (o.type !== 'stool' && ang <= 40 && d <= 380 && (!wv || d < wv.d)) wv = { d, at: w.c };
+      }
+      if (wv) add('window', 'Blick aus dem Fenster', 10, `${(wv.d / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, wv.at);
+      // Spiegelungen auf Flächen, die der Platz sieht
+      const glare = [];
+      for (const s of surfaces) {
+        if (G.dot(G.sub(o, s.p), s.n) < 20) continue;
+        if (turnTo(o, s.p) > 95) continue;
+        const hits = A.glare(o, s, wins);
+        if (hits.length) glare.push({ s, hits });
+      }
+      if (glare.length) add('glare', 'Spiegelung des Fensters', 10, glare.map((x) => x.s.name).join(', '));
+      // Ruhezone
+      const inQuiet = zones.some((z) => G.pointInPoly(A.worldParts(z, S)[0], o));
+      if (inQuiet) add('quiet', 'In einer Ruhezone', -20, '');
+      let score = factors.reduce((a, b) => a + b.pts, 0);
+      score = Math.max(0, Math.min(100, score));
+      const cat = score < 25 ? 'calm' : score < 50 ? 'mid' : 'busy';
+      seats.push({ id: o.id, x: o.x, y: o.y, score, cat, factors: factors.sort((a, b) => b.pts - a.pts), glare, doorWalk: paths.has(o.id) ? paths.get(o.id).walk : Infinity, doorDist: dd });
+    }
+    const res = {
+      grid,
+      seats,
+      doors: doorPts,
+      lounge: lounge.map((l) => ({ x: l.x, y: l.y })),
+      calm: seats.filter((s) => s.cat === 'calm').length,
+      mid: seats.filter((s) => s.cat === 'mid').length,
+      busy: seats.filter((s) => s.cat === 'busy').length,
+      glareSeats: seats.filter((s) => s.glare.length).length,
+      hasDoor: doors.length > 0,
+    };
+    res.paths = () => {
+      const out = [];
+      for (const [id, p] of paths) {
+        if (!p.pts) {
+          const o = doc.objects.find((x) => x.id === id);
+          p.pts = A.walkRoute(grid, field, p.k, null, o);
+        }
+        out.push(p.pts);
+      }
+      return out;
+    };
+    return res;
+  };
+
+  /* ---------- Umbau zwischen zwei Phasen ----------
+     Vergleicht die Objekte zweier Anordnungen (gleiche IDs = gleiches
+     Möbelstück) und schätzt den Aufwand grob ab. */
+  const EFFORT = { table: 15, tableRect: 15, chair: 6, stool: 5, beanbag: 6, shelfRound: 25, partition: 20, sofa2: 45, sofaCorner: 40, rug: 30, rugRect: 30, officeChair: 6 };
+  const SKIP = { teacher: 1, label: 1, zone: 1, zoneRound: 1, wheelchair: 1 };
+  A.rebuild = function (prev, cur) {
+    const before = new Map(prev.filter((o) => !SKIP[o.type]).map((o) => [o.id, o]));
+    const moved = [];
+    const added = [];
+    let sec = 0;
+    const cost = (o, dist) => (EFFORT[o.type] || 20) + dist / 80;
+    for (const o of cur) {
+      if (SKIP[o.type]) continue;
+      const p = before.get(o.id);
+      if (!p || p.type !== o.type) {
+        added.push(o);
+        sec += cost(o, 300);
+        continue;
+      }
+      before.delete(o.id);
+      const dist = G.dist(p, o);
+      const drot = Math.abs(G.normAngle((o.rot || 0) - (p.rot || 0)));
+      if (dist < 5 && drot < 3) continue;
+      moved.push({ id: o.id, type: o.type, from: p, to: o, dist, drot });
+      sec += dist < 5 ? 4 : cost(o, dist);
+    }
+    const removed = [...before.values()];
+    for (const o of removed) sec += cost(o, 300);
+    const by = (list, kind) => list.filter((x) => (x.type || '') && (kind === 'table' ? T[x.type].kind === 'table' : kind === 'seat' ? x.type === 'chair' || x.type === 'stool' : T[x.type].kind !== 'table' && x.type !== 'chair' && x.type !== 'stool')).length;
+    const distSum = moved.reduce((a, m) => a + m.dist, 0);
+    return {
+      moved,
+      added,
+      removed,
+      tables: by(moved, 'table') + by(added, 'table') + by(removed, 'table'),
+      seats: by(moved, 'seat') + by(added, 'seat') + by(removed, 'seat'),
+      other: by(moved, 'other') + by(added, 'other') + by(removed, 'other'),
+      distSum,
+      sec,
+      changes: moved.length + added.length + removed.length,
+    };
+  };
+
+  /* ---------- Sitzplan: Bedarfe der Lernenden ---------- */
+  A.NEEDS = [
+    { key: 'hear', label: 'Hören', long: 'Hörbeeinträchtigung', hint: 'Nah an Tafel und Lehrkraft, Gesicht der Lehrkraft gut sichtbar (Lippenlesen), eher ruhig.' },
+    { key: 'see', label: 'Sehen', long: 'Sehbeeinträchtigung', hint: 'Direkter Blick auf eine Präsentationsfläche, höchstens 3 m entfernt.' },
+    { key: 'wheel', label: 'Rollstuhl', long: 'Nutzt einen Rollstuhl', hint: 'Rollstuhlplatz (Test-Rollstuhl im Plan), der von der Tür aus erreichbar ist.' },
+    { key: 'calm', label: 'Ruhe', long: 'Braucht einen reizarmen Platz', hint: 'Ruhiger Platz laut Reiz- & Ruhe-Check (z. B. Autismus-Spektrum, Konzentration).' },
+    { key: 'move', label: 'Bewegung', long: 'Braucht Bewegung', hint: 'Wackelhocker oder Platz mit Bewegungsraum dahinter (z. B. ADHS).' },
+    { key: 'help', label: 'Unterstützung', long: 'Braucht häufig Unterstützung', hint: 'Die Lehrkraft erreicht den Platz schnell und hat Blickkontakt.' },
+    { key: 'exit', label: 'Ausgang', long: 'Kurzer Weg zur Tür', hint: 'Höchstens 3,5 m Weg zur Tür (z. B. für Pausen oder medizinische Gründe).' },
+  ];
+  A.NEED = Object.fromEntries(A.NEEDS.map((n) => [n.key, n]));
+
+  /* Kennzahlen je Sitzplatz aus allen Prüfungen */
+  A.seatInfo = function (doc, pre) {
+    pre = pre || {};
+    const S = doc.settings;
+    const sight = pre.sight || A.sight(doc);
+    const teacher = pre.teacher || A.teacher(doc, { image: false });
+    const calm = pre.calm || A.calm(doc);
+    const access = pre.access || A.access(doc, { image: false });
+    const grid = teacher.grid;
+    const info = new Map();
+    for (const o of doc.objects) {
+      if (!A.isSeat(o)) continue;
+      const sg = sight.seats.find((x) => x.id === o.id);
+      const tc = teacher.seats.find((x) => x.id === o.id);
+      const cm = calm.seats.find((x) => x.id === o.id);
+      // Bewegungsraum: hinter dem Platz frei begehbar?
+      const back = G.rot({ x: 0, y: 1 }, o.rot || 0);
+      const behind = [55, 80].map((d) => grid.cellAt(G.add(o, G.mul(back, d))));
+      const space = o.type === 'stool' || behind.every((k) => k >= 0 && grid.free[k]);
+      // Rollstuhl: Test-Rollstuhl erreichbar oder Tischkante mit Rollstuhlplatz neben diesem Stuhl
+      let wheel = 2;
+      if (o.type === 'wheelchair') {
+        const w = access.wheelchairs.find((x) => x.id === o.id);
+        wheel = w && w.ok ? 0 : 2;
+      } else {
+        for (const t of access.tables) {
+          for (const sp of t.spots) {
+            if (G.dist(sp.p, o) < S.chairD + 25) wheel = Math.min(wheel, sp.now ? 1 : 2);
+          }
+        }
+      }
+      info.set(o.id, {
+        id: o.id,
+        type: o.type,
+        x: o.x,
+        y: o.y,
+        sightCat: sg ? sg.cat : 'none',
+        sightDist: sg && sg.best ? sg.best.dist : Infinity,
+        teacherCat: tc ? tc.cat : 'none',
+        eye: tc && tc.eye ? tc.eye.kind : 'blocked',
+        teacherDist: tc && tc.eye ? tc.eye.d : Infinity,
+        walk: tc ? tc.walk : Infinity,
+        calmCat: cm ? cm.cat : 'mid',
+        calmScore: cm ? cm.score : 50,
+        doorWalk: cm ? cm.doorWalk : Infinity,
+        space,
+        wheel,
+      });
+    }
+    return { info, sight, teacher, calm, access };
+  };
+
+  /* Bewertung eines Bedarfs an einem Platz: 0 = passt, 1 = eingeschränkt, 2 = passt nicht */
+  const m1 = (cm) => (cm / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' m';
+  A.needFit = function (key, si) {
+    if (!si) return { st: 2, text: 'Kein Platz' };
+    if (key === 'hear') {
+      let st = 0;
+      const why = [];
+      if (si.sightCat === 'none' || si.sightCat === 'back') (st = 2), why.push('kein Blick auf Tafel/Bildschirm');
+      else if (si.sightCat !== 'good') (st = Math.max(st, 1)), why.push('Sicht eingeschränkt');
+      if (si.sightDist > 550) (st = Math.max(st, 1)), why.push(`Tafel ${m1(si.sightDist)} entfernt`);
+      if (si.eye === 'back' || si.eye === 'blocked') (st = Math.max(st, 2)), why.push('Lehrkraft nicht im Blick');
+      else if (si.eye === 'profile') (st = Math.max(st, 1)), why.push('Lehrkraft nur seitlich im Blick');
+      if (si.teacherDist > 500) (st = Math.max(st, 1)), why.push(`Lehrkraft ${m1(si.teacherDist)} entfernt`);
+      if (si.calmCat === 'busy') (st = Math.max(st, 1)), why.push('unruhiger Platz');
+      return { st, text: st ? why.join(', ') : 'nah, gute Sicht auf Tafel und Lehrkraft' };
+    }
+    if (key === 'see') {
+      if (si.sightCat === 'none' || si.sightCat === 'back') return { st: 2, text: 'kein Blick auf eine Präsentationsfläche' };
+      if (si.sightCat === 'good' && si.sightDist <= 300) return { st: 0, text: `direkter Blick, ${m1(si.sightDist)} entfernt` };
+      if (si.sightDist > 450) return { st: 2, text: `Präsentationsfläche ${m1(si.sightDist)} entfernt` };
+      return { st: 1, text: si.sightCat !== 'good' ? 'Sicht eingeschränkt' : `${m1(si.sightDist)} entfernt (besser ≤ 3 m)` };
+    }
+    if (key === 'wheel') {
+      if (si.type === 'wheelchair') return si.wheel === 0 ? { st: 0, text: 'Rollstuhlplatz, von der Tür erreichbar' } : { st: 2, text: 'Rollstuhlplatz ohne Weg von der Tür' };
+      if (si.wheel === 1) return { st: 1, text: 'Stuhl gegen Rollstuhl tauschen – Platz ist erreichbar' };
+      return { st: 2, text: 'kein Rollstuhlplatz' };
+    }
+    if (key === 'calm') return si.calmCat === 'calm' ? { st: 0, text: 'ruhiger Platz' } : si.calmCat === 'mid' ? { st: 1, text: 'mittlere Unruhe' } : { st: 2, text: 'unruhiger Platz' };
+    if (key === 'move') return si.type === 'stool' ? { st: 0, text: 'Wackelhocker' } : si.space ? { st: 0, text: 'Bewegungsraum hinter dem Platz' } : { st: 1, text: 'wenig Platz hinter dem Stuhl – evtl. Wackelhocker' };
+    if (key === 'help') {
+      if (si.teacherCat === 'none') return { st: 2, text: 'Lehrkraft kommt nicht hin oder sieht den Platz nicht' };
+      if (si.walk > 800 || si.eye === 'back') return { st: 1, text: si.eye === 'back' ? 'sitzt mit dem Rücken zur Lehrkraft' : `Weg ${m1(si.walk)}` };
+      if (si.walk > 500 || si.eye === 'profile') return { st: 1, text: si.eye === 'profile' ? 'Lehrkraft nur seitlich im Blick' : `Weg ${m1(si.walk)}` };
+      return { st: 0, text: `Weg ${m1(si.walk)}, Blickkontakt` };
+    }
+    if (key === 'exit') return si.doorWalk <= 350 ? { st: 0, text: `${m1(si.doorWalk)} zur Tür` } : si.doorWalk <= 550 ? { st: 1, text: `${m1(si.doorWalk)} zur Tür` } : { st: 2, text: si.doorWalk === Infinity ? 'kein Weg zur Tür' : `${m1(si.doorWalk)} zur Tür` };
+    return { st: 0, text: '' };
+  };
+
+  const NEAR = 160;
+  /* Bewertung aller Lernenden mit Platz */
+  A.learnerFit = function (doc, si) {
+    const seatOf = new Map();
+    for (const o of doc.objects) if (o.learner && A.isSeat(o)) seatOf.set(o.learner, o);
+    const out = [];
+    for (const l of doc.learners || []) {
+      const o = seatOf.get(l.id);
+      const checks = [];
+      if (o) {
+        const info = si.info.get(o.id);
+        for (const k of l.needs || []) checks.push(Object.assign({ need: k, label: A.NEED[k] ? A.NEED[k].label : k }, A.needFit(k, info)));
+        if (o.type === 'wheelchair' && !(l.needs || []).includes('wheel')) checks.push({ need: 'seat', label: 'Platz', st: 1, text: 'Rollstuhlplatz ohne Rollstuhlbedarf' });
+        for (const id of l.with || []) {
+          const other = seatOf.get(id);
+          const nm = (doc.learners.find((x) => x.id === id) || {}).name || '?';
+          if (!other) continue;
+          const d = G.dist(o, other);
+          checks.push({ need: 'with', label: 'neben ' + nm, st: d <= NEAR ? 0 : 1, text: d <= NEAR ? 'sitzt in der Nähe' : `${m1(d)} entfernt` });
+        }
+        for (const id of l.apart || []) {
+          const other = seatOf.get(id);
+          const nm = (doc.learners.find((x) => x.id === id) || {}).name || '?';
+          if (!other) continue;
+          const d = G.dist(o, other);
+          checks.push({ need: 'apart', label: 'nicht neben ' + nm, st: d <= NEAR ? 2 : 0, text: d <= NEAR ? 'sitzt zu nah' : `${m1(d)} entfernt` });
+        }
+      }
+      const worst = checks.reduce((a, c) => Math.max(a, c.st), 0);
+      out.push({ learner: l, seat: o || null, checks, st: o ? worst : -1 });
+    }
+    return out;
+  };
+
+  /* Automatisch verteilen: Lernende mit den meisten Bedarfen zuerst auf den
+     jeweils passendsten freien Platz, danach Verbesserung durch Tauschen. */
+  A.autoAssign = function (doc, si) {
+    const learners = doc.learners || [];
+    const seats = doc.objects.filter(A.isSeat);
+    const pen = [0, 1, 4];
+    const base = (l, s) => {
+      const info = si.info.get(s.id);
+      let c = 0;
+      const needs = l.needs || [];
+      for (const k of needs) c += pen[A.needFit(k, info).st];
+      if (s.type === 'wheelchair' && !needs.includes('wheel')) c += 6;
+      return c;
+    };
+    const cost = new Map();
+    for (const l of learners) for (const s of seats) cost.set(l.id + '|' + s.id, base(l, s));
+    const assign = new Map();
+    const order = learners.slice().sort((a, b) => (b.needs || []).length * 2 + (b.with || []).length + (b.apart || []).length - ((a.needs || []).length * 2 + (a.with || []).length + (a.apart || []).length));
+    // Plätze von vorn nach hinten (Nähe zur besten Präsentationsfläche)
+    const front = seats.slice().sort((a, b) => si.info.get(a.id).sightDist - si.info.get(b.id).sightDist);
+    const used = new Set();
+    for (const l of order) {
+      let best = null;
+      for (const s of front) {
+        if (used.has(s.id)) continue;
+        const c = cost.get(l.id + '|' + s.id);
+        if (!best || c < best.c) best = { s, c };
+      }
+      if (!best) break;
+      used.add(best.s.id);
+      assign.set(l.id, best.s);
+    }
+    const rel = (l) => {
+      const s = assign.get(l.id);
+      if (!s) return 0;
+      let c = 0;
+      for (const id of l.with || []) {
+        const o = assign.get(id);
+        if (o && G.dist(s, o) > NEAR) c += 2;
+      }
+      for (const id of l.apart || []) {
+        const o = assign.get(id);
+        if (o && G.dist(s, o) <= NEAR) c += 4;
+      }
+      return c;
+    };
+    const total = () => {
+      let c = 0;
+      for (const l of learners) {
+        const s = assign.get(l.id);
+        c += s ? cost.get(l.id + '|' + s.id) + rel(l) : 50;
+      }
+      return c;
+    };
+    // Tauschen (auch mit freien Plätzen), solange es besser wird
+    let cur = total();
+    for (let round = 0; round < 6; round++) {
+      let improved = false;
+      for (const l of learners) {
+        for (const s of seats) {
+          const mine = assign.get(l.id);
+          if (mine === s) continue;
+          const owner = learners.find((x) => assign.get(x.id) === s);
+          if (owner) assign.set(owner.id, mine);
+          assign.set(l.id, s);
+          const next = total();
+          if (next < cur - 1e-9) {
+            cur = next;
+            improved = true;
+          } else {
+            assign.set(l.id, mine);
+            if (owner) assign.set(owner.id, s);
+          }
+        }
+      }
+      if (!improved) break;
+    }
+    const out = new Map();
+    for (const [lid, s] of assign) if (s) out.set(s.id, lid);
+    return out;
+  };
+
   /* Objekte, die beim Verschieben eines Tisches mitgenommen werden (angestellte Stühle) */
   A.attachedSeats = function (doc, tableIds) {
     const S = doc.settings;

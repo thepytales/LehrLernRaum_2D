@@ -11,6 +11,8 @@
   const PREF_KEYS = ['snap', 'carryChairs', 'angleSnap', 'grid', 'gridSnap', 'sightPersons'];
   const GRID_MAJOR = { 10: 50, 20: 100, 25: 100, 50: 100, 100: 500 };
   const HATCH = '<pattern id="hatch-wall" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#5B6168"/><line x1="0" y1="0" x2="0" y2="8" stroke="#6E747B" stroke-width="3"/></pattern>';
+  /* Boden: heller Linoleum mit feiner Sprenkelung (wie im LLR) */
+  const FLOOR = '<pattern id="floor-tex" width="60" height="60" patternUnits="userSpaceOnUse"><circle cx="7" cy="11" r="0.9" fill="#D9D2C3" fill-opacity="0.6"/><circle cx="31" cy="4" r="0.7" fill="#CFC7B6" fill-opacity="0.5"/><circle cx="48" cy="22" r="1" fill="#D9D2C3" fill-opacity="0.55"/><circle cx="19" cy="37" r="0.8" fill="#CFC7B6" fill-opacity="0.5"/><circle cx="54" cy="49" r="0.7" fill="#D9D2C3" fill-opacity="0.6"/><circle cx="36" cy="53" r="1.1" fill="#E2DCCF" fill-opacity="0.7"/><circle cx="4" cy="52" r="0.6" fill="#CFC7B6" fill-opacity="0.5"/><path d="M12 24 q6 -3 12 0" fill="none" stroke="#E4DED2" stroke-width="0.8" stroke-opacity="0.8"/><path d="M40 36 q5 2 10 -1" fill="none" stroke="#E4DED2" stroke-width="0.8" stroke-opacity="0.8"/></pattern>';
   const SIGHT_COLORS = { good: '#2F9E44', side: '#F59F00', person: '#F59F00', back: '#E03131', none: '#E03131', hidden: '#E03131' };
   const ROUTE_NOW = '#1F6FEB';
   const ROUTE_MOVE = '#E67700';
@@ -37,7 +39,7 @@
     view: { x: 0, y: 0, w: 800, h: 900 },
     mode: 'select',
     multi: false,
-    overlay: { access: false, sight: false, grid: true, dims: true, roomDims: true },
+    overlay: { access: false, sight: false, teacher: false, calm: false, seating: false, rebuild: false, grid: true, dims: true, roomDims: true },
     /* Analysen, die das Panel braucht, auch wenn sie im Plan ausgeblendet sind */
     need: { access: false },
     measure: null,
@@ -58,6 +60,11 @@
   const S = () => app.doc.settings;
   const byId = (id) => app.doc.objects.find((o) => o.id === id);
   const isTable = A.isTable;
+
+  /* Prüfansichten im Plan: immer nur eine zur Zeit */
+  const LENSES = ['access', 'sight', 'teacher', 'calm', 'seating', 'rebuild'];
+  app.LENSES = LENSES;
+  app.lens = () => LENSES.find((k) => app.overlay[k]) || null;
 
   app.on = (ev, fn) => (app.listeners[ev] = app.listeners[ev] || []).push(fn);
   app.emit = (ev, data) => (app.listeners[ev] || []).forEach((fn) => fn(data));
@@ -107,22 +114,58 @@
     const settings = Object.assign({}, LLR.DEFAULT_SETTINGS, raw.settings || {});
     settings.grid = clamp(Math.round(Number(settings.grid)) || LLR.DEFAULT_SETTINGS.grid, 5, 500);
     settings.gridSnap = !!settings.gridSnap;
-    const objects = [];
-    for (const o of raw.objects) {
-      if (!o || !T[o.type]) continue;
-      const c = Object.assign({}, o);
-      c.id = typeof c.id === 'string' && c.id ? c.id : LLR.newId();
-      c.x = Number(c.x) || 0;
-      c.y = Number(c.y) || 0;
-      c.rot = G.normAngle(Number(c.rot) || 0);
-      objects.push(c);
+    // Lernende (Sitzplan)
+    let learners;
+    if (Array.isArray(raw.learners) && raw.learners.length) {
+      const lids = new Set();
+      learners = raw.learners
+        .filter((l) => l && typeof l === 'object')
+        .map((l) => {
+          let id = typeof l.id === 'string' && l.id ? l.id : LLR.newId();
+          if (lids.has(id)) id = LLR.newId();
+          lids.add(id);
+          const out = {
+            id,
+            name: String(l.name || '?').slice(0, 40),
+            needs: Array.isArray(l.needs) ? l.needs.filter((k) => A.NEED[k]) : [],
+            with: Array.isArray(l.with) ? l.with.map(String) : [],
+            apart: Array.isArray(l.apart) ? l.apart.map(String) : [],
+          };
+          if (l.note) out.note = String(l.note).slice(0, 200);
+          return out;
+        });
     }
-    const ids = new Set();
-    for (const o of objects) {
-      if (ids.has(o.id)) o.id = LLR.newId();
-      ids.add(o.id);
+    const known = new Set((learners || []).map((l) => l.id));
+    if (learners) for (const l of learners) for (const k of ['with', 'apart']) l[k] = l[k].filter((id) => known.has(id) && id !== l.id);
+    const cleanObjs = (list) => {
+      const out = [];
+      const ids = new Set();
+      for (const o of list || []) {
+        if (!o || !T[o.type]) continue;
+        const c = Object.assign({}, o);
+        c.id = typeof c.id === 'string' && c.id && !ids.has(c.id) ? c.id : LLR.newId();
+        ids.add(c.id);
+        c.x = Number(c.x) || 0;
+        c.y = Number(c.y) || 0;
+        c.rot = G.normAngle(Number(c.rot) || 0);
+        if (c.learner && !known.has(c.learner)) delete c.learner;
+        out.push(c);
+      }
+      return out;
+    };
+    const doc = { v: 1, name: String(raw.name || 'Raumplan').slice(0, 120), room, settings, objects: cleanObjs(raw.objects) };
+    if (learners) doc.learners = learners;
+    // Unterrichtsphasen: die Objekte der aktiven Phase stehen in doc.objects
+    if (Array.isArray(raw.phases) && raw.phases.length > 1) {
+      const active = clamp(Math.round(Number(raw.phase) || 0), 0, raw.phases.length - 1);
+      doc.phases = raw.phases.map((ph, i) => ({
+        id: ph && typeof ph.id === 'string' && ph.id ? ph.id : LLR.newId(),
+        name: String((ph && ph.name) || 'Phase ' + (i + 1)).slice(0, 60),
+        objects: i === active ? null : cleanObjs(ph && ph.objects),
+      }));
+      doc.phase = active;
     }
-    return { v: 1, name: String(raw.name || 'Raumplan').slice(0, 120), room, settings, objects };
+    return doc;
   };
 
   app.serialize = () => JSON.stringify(app.doc);
@@ -222,6 +265,7 @@
     app.renderObjects();
     app.problems = A.problems(app.doc);
     app.scheduleAnalysis(opts.fast ? 140 : 0);
+    if (app.overlay.teacher || app.overlay.calm) app.renderAnalysisLayer();
     app.renderOverlay();
     if (!opts.live) {
       app.autosave();
@@ -243,7 +287,7 @@
     app.svg = svg;
     svg.innerHTML = '';
     app.els.defs = el('defs', {}, svg);
-    app.els.defs.innerHTML = HATCH;
+    app.els.defs.innerHTML = HATCH + LLR.FURN_DEFS;
     app.els.floor = el('g', { id: 'layer-floor' }, svg);
     app.els.analysis = el('g', { id: 'layer-analysis' }, svg);
     app.els.walls = el('g', { id: 'layer-walls' }, svg);
@@ -264,10 +308,12 @@
     app.els.defs.innerHTML =
       `<pattern id="grid-s" width="${g}" height="${g}" patternUnits="userSpaceOnUse"><path d="M${g} 0H0V${g}" fill="none" stroke="#D9D4C8" stroke-width="${g < 25 ? 0.45 : 0.6}"/></pattern>` +
       `<pattern id="grid-l" width="${M}" height="${M}" patternUnits="userSpaceOnUse"><rect width="${M}" height="${M}" fill="url(#grid-s)"/><path d="M${M} 0H0V${M}" fill="none" stroke="#C9C2B3" stroke-width="1"/></pattern>` +
-      HATCH;
+      FLOOR +
+      HATCH +
+      LLR.FURN_DEFS;
     const fl = app.els.floor;
     fl.innerHTML =
-      `<rect x="0" y="0" width="${W}" height="${L}" fill="#FBF8F2"/>` +
+      `<rect x="0" y="0" width="${W}" height="${L}" fill="#F7F4EE"/><rect x="0" y="0" width="${W}" height="${L}" fill="url(#floor-tex)"/>` +
       (app.overlay.grid ? `<rect x="0" y="0" width="${W}" height="${L}" fill="url(#grid-l)"/>` : '');
     let w = `<path fill-rule="evenodd" fill="url(#hatch-wall)" stroke="#3F444A" stroke-width="1" d="M${-WALL} ${-WALL}H${W + WALL}V${L + WALL}H${-WALL}Z M0 0V${L}H${W}V0Z"/>`;
     // Wände ziehen = Raumgröße ändern (unsichtbare Griffflächen)
@@ -302,25 +348,45 @@
   const shapeKey = (o) => {
     const s = S();
     return [
-      o.type, o.w, o.d, o.color, o.foot, o.mirror, o.outward, o.text, o.size, o.label,
+      o.type, o.w, o.d, o.color, o.foot, o.mirror, o.outward, o.text, o.size, o.label, o.learner ? app.learnerName(o.learner) : '',
       o.type === 'table' ? s.tableBase + 'x' + s.tableHeight : '',
       o.type === 'chair' ? s.chairW + 'x' + s.chairD : '',
     ].join('|');
   };
 
+  /* Weicher Schatten aus der Grundfläche: ein etwas größerer, sehr heller und
+     ein deckungsgleicher, dunklerer Umriss. Der Versatz wird in setTransform
+     in Raumrichtung gedreht, damit das Licht immer von links oben kommt. */
+  const SHADOW_OFF = { x: 2.4, y: 3.2 };
+  function shadowMarkup(o) {
+    const parts = app.localParts(o).filter((p) => p.length >= 3);
+    if (!parts.length) return '';
+    const soft = parts.map((p) => G.roundedPath(G.inset(p, -2.6), 6)).join(' ');
+    const core = parts.map((p) => G.roundedPath(p, 3)).join(' ');
+    return `<g class="shadow" pointer-events="none"><path d="${soft}" fill="#2A1D0E" fill-opacity="0.07"/><path d="${core}" fill="#2A1D0E" fill-opacity="0.11"/></g>`;
+  }
+  app.shadowMarkup = shadowMarkup;
+  app.SHADOW_OFF = SHADOW_OFF;
+
   function buildNode(n, o) {
     const d = def(o);
-    let html = '<g class="shape">' + d.draw(o, S()) + '</g>';
+    let html = (d.shadow ? shadowMarkup(o) : '') + '<g class="shape">' + d.draw(o, S()) + '</g>';
     if (d.hitPad) {
       const b = G.bbox(app.localBounds(o));
       html += `<rect x="${f(b.minX - 4)}" y="${f(b.minY - 4)}" width="${f(b.w + 8)}" height="${f(b.h + 8)}" fill="transparent"/>`;
     }
-    if (o.label && d.kind !== 'label' && d.kind !== 'zone') {
-      const fs = d.kind === 'seat' ? 10 : 13;
-      html += `<g class="lbl"><text x="0" y="0" font-size="${fs}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-weight="700" fill="#111" paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round">${LLR.esc(o.label)}</text></g>`;
+    // Beschriftung bzw. Name der Person auf dem Platz (Sitzplan)
+    const person = o.learner ? app.learnerName(o.learner) : '';
+    const text = person || o.label;
+    if (text && d.kind !== 'label' && d.kind !== 'zone') {
+      const fs = d.kind === 'seat' || d.kind === 'wheelchair' ? 10.5 : 13;
+      const t = text.length > 14 ? text.slice(0, 13) + '…' : text;
+      const fill = person ? '#0B3B8C' : '#111';
+      html += `<g class="lbl"><text x="0" y="0" font-size="${fs}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-weight="700" fill="${fill}" paint-order="stroke" stroke="#fff" stroke-width="3.2" stroke-linejoin="round">${LLR.esc(t)}</text></g>`;
     }
     n.g.innerHTML = html;
     n.lbl = n.g.querySelector('.lbl');
+    n.sh = n.g.querySelector('.shadow');
     // Namensschild (Zonen) in eigener Ebene über den Möbeln
     if (d.tag) {
       if (!n.tag) n.tag = el('g', { 'data-id': o.id, class: 'obj' }, app.els.tags);
@@ -336,6 +402,7 @@
     n.g.setAttribute('transform', tf);
     if (n.tag) n.tag.setAttribute('transform', tf);
     if (n.lbl) n.lbl.setAttribute('transform', `rotate(${f(-(o.rot || 0))})`);
+    if (n.sh) n.sh.setAttribute('transform', `rotate(${f(-(o.rot || 0))}) translate(${SHADOW_OFF.x} ${SHADOW_OFF.y}) rotate(${f(o.rot || 0)})`);
   }
 
   app.renderObjects = function () {
@@ -394,7 +461,7 @@
       clearTimeout(fullTimer);
       anaTimer = fullTimer = null;
       app.access = null;
-      app.els.analysis.innerHTML = '';
+      app.renderAnalysisLayer();
       return;
     }
     const run = (quick) => {
@@ -403,8 +470,7 @@
       fullTimer = quick ? setTimeout(() => run(false), 450) : null;
       anaLast = performance.now();
       app.access = A.access(app.doc, { image: app.overlay.access, quick });
-      const im = app.access.image;
-      app.els.analysis.innerHTML = im ? `<image href="${im.url}" x="0" y="0" width="${im.w}" height="${im.h}" preserveAspectRatio="none" opacity="1"/>` : '';
+      app.renderAnalysisLayer();
       app.renderMarks();
       app.emit('analysis');
     };
@@ -417,6 +483,19 @@
     if (anaTimer) return;
     const wait = Math.max(0, throttle - (performance.now() - anaLast));
     anaTimer = setTimeout(() => run(true), wait);
+  };
+
+  /* Flächenbild unter den Möbeln: Rollstuhl-Befahrbarkeit oder Reichweite der Lehrkraft */
+  app.renderAnalysisLayer = function () {
+    let im = null;
+    let html = '';
+    if (app.overlay.access && app.access) im = app.access.image;
+    else if (app.overlay.teacher) im = app.getTeacher().image;
+    else if (app.overlay.calm && LLR.lenses) html = LLR.lenses.calmFloor();
+    if (im) html = `<image href="${im.url}" x="0" y="0" width="${im.w}" height="${im.h}" preserveAspectRatio="none"/>`;
+    if (app.els.analysis._html === html) return;
+    app.els.analysis._html = html;
+    app.els.analysis.innerHTML = html;
   };
 
   app.setNeed = function (key, val) {
@@ -432,6 +511,31 @@
     if (sightMemo.key !== key) sightMemo = { key, res: A.sight(app.doc) };
     return sightMemo.res;
   };
+
+  /* Aufwendigere Analysen: zwischengespeichert; während des Ziehens höchstens
+     alle 250 ms neu berechnet (bis dahin gilt das letzte Ergebnis) */
+  const memo = {};
+  function memoized(name, fn) {
+    const key = app.serialize();
+    const m = memo[name];
+    if (m && m.key === key) return m.res;
+    if (m && app.drag && app.drag.moved && performance.now() - m.t < 250) return m.res;
+    const res = fn();
+    memo[name] = { key, res, t: performance.now() };
+    return res;
+  }
+  app.getTeacher = () => memoized('teacher', () => A.teacher(app.doc));
+  app.getCalm = () => memoized('calm', () => A.calm(app.doc));
+  app.getSeatInfo = () =>
+    memoized('seatInfo', () =>
+      A.seatInfo(app.doc, {
+        sight: app.getSight(),
+        teacher: app.getTeacher(),
+        calm: app.getCalm(),
+        access: app.access && app.access.complete ? app.access : null,
+      })
+    );
+  app.getLearnerFit = () => memoized('fit', () => A.learnerFit(app.doc, app.getSeatInfo()));
 
   /* Weg von der Tür als gestrichelte Linie mit weißem Rand */
   function routeMarkup(pts, color, k) {
@@ -508,6 +612,9 @@
       if (coneIds.length <= 8) for (const id of coneIds) h += coneMarkup(A.sightCone(app.doc, id), k);
       for (const s of sight.seats) h += `<g transform="translate(${f(s.x)} ${f(s.y)})">${LLR.sightGlyph(s.cat)}</g>`;
     }
+    // weitere Prüfansichten (Lehrkraft, Ruhe, Sitzplan, Umbau): js/lenses.js
+    const lens = app.lens();
+    if (lens && LLR.lenses && LLR.lenses[lens]) h += LLR.lenses[lens](k);
     app.els.marks.innerHTML = h;
   };
 
@@ -703,8 +810,9 @@
       const R = app.doc.room;
       h += chip({ x: R.w / 2, y: R.l / 2 }, k, `${fmtM(R.w)} × ${fmtM(R.l)} · ${fmtArea(R.w * R.l)}`);
     }
-    // Abstände des ausgewählten Objekts
-    if (selObjs.length === 1 && app.overlay.dims) {
+    // Abstände des ausgewählten Objekts (nicht bei Prüfansichten mit eigenen Marken am Objekt)
+    const lens = app.lens();
+    if (selObjs.length === 1 && app.overlay.dims && (!lens || lens === 'access')) {
       const lines = A.clearances(app.doc, selObjs[0].id);
       const need = S().passage;
       for (const ln of lines) {
@@ -907,6 +1015,17 @@
 
   app.selectedObjects = () => [...app.sel].map(byId).filter(Boolean);
 
+  /* Nächster Sitzplatz an einem Punkt (für Ziehen & Ablegen von Namen) */
+  app.seatAt = function (p, maxD) {
+    let best = null;
+    for (const o of app.doc.objects) {
+      if (!A.isSeat(o)) continue;
+      const d = G.dist(o, p);
+      if (d <= (maxD || 45) && (!best || d < best.d)) best = { o, d };
+    }
+    return best ? best.o : null;
+  };
+
   app.deleteSelected = function () {
     const objs = app.selectedObjects();
     const del = objs.filter((o) => !o.locked);
@@ -1056,11 +1175,289 @@
     app.emit('select');
   };
 
+  /* ---------- Sitzplan: Lernende ---------- */
+  app.learners = () => app.doc.learners || [];
+  app.learnerById = (id) => app.learners().find((l) => l.id === id);
+  app.learnerName = (id) => {
+    const l = app.learnerById(id);
+    return l ? l.name : '';
+  };
+  /* Platz der Person in der aktiven Phase */
+  app.seatOf = (lid) => app.doc.objects.find((o) => o.learner === lid && A.isSeat(o));
+
+  /* Person auf einen Platz setzen (null = Platz leeren); die Person verlässt ihren bisherigen Platz */
+  app.assignLearner = function (seatId, lid) {
+    const seat = byId(seatId);
+    if (!seat || !A.isSeat(seat)) return;
+    app.mutate(() => {
+      if (lid) for (const o of app.doc.objects) if (o.learner === lid) delete o.learner;
+      if (lid) seat.learner = lid;
+      else delete seat.learner;
+    });
+  };
+
+  app.addLearners = function (names) {
+    const added = [];
+    app.mutate((doc) => {
+      doc.learners = doc.learners || [];
+      for (const n of names) {
+        const name = String(n).trim().slice(0, 40);
+        if (!name) continue;
+        const l = { id: LLR.newId(), name, needs: [], with: [], apart: [] };
+        doc.learners.push(l);
+        added.push(l);
+      }
+    });
+    return added;
+  };
+
+  app.updateLearner = function (id, patch) {
+    app.mutate((doc) => {
+      const l = (doc.learners || []).find((x) => x.id === id);
+      if (!l) return;
+      Object.assign(l, patch);
+      // Beziehungen gelten in beide Richtungen
+      for (const k of ['with', 'apart']) {
+        if (!patch[k]) continue;
+        for (const o of doc.learners) {
+          if (o.id === id) continue;
+          const has = l[k].includes(o.id);
+          const back = o[k].includes(id);
+          if (has && !back) o[k].push(id);
+          if (!has && back) o[k] = o[k].filter((x) => x !== id);
+        }
+      }
+    });
+  };
+
+  app.removeLearners = function (ids) {
+    const del = new Set(ids);
+    app.mutate((doc) => {
+      doc.learners = (doc.learners || []).filter((l) => !del.has(l.id));
+      for (const l of doc.learners) {
+        l.with = l.with.filter((x) => !del.has(x));
+        l.apart = l.apart.filter((x) => !del.has(x));
+      }
+      if (!doc.learners.length) delete doc.learners;
+      for (const o of app.allObjects()) if (o.learner && del.has(o.learner)) delete o.learner;
+    });
+  };
+
+  app.clearSeating = function () {
+    app.mutate(() => app.doc.objects.forEach((o) => delete o.learner));
+  };
+
+  /* Zuordnung Platz → Person übernehmen (Automatisch verteilen) */
+  app.applySeating = function (map) {
+    app.mutate(() => {
+      for (const o of app.doc.objects) delete o.learner;
+      for (const [sid, lid] of map) {
+        const o = byId(sid);
+        if (o) o.learner = lid;
+      }
+    });
+  };
+
+  /* ---------- Unterrichtsphasen ----------
+     doc.phases = [{ id, name, objects }], doc.phase = aktive Phase. Die
+     Objekte der aktiven Phase stehen in doc.objects (objects: null). Gleiche
+     IDs in zwei Phasen = dasselbe Möbelstück (für Umbau und Animation). */
+  app.phases = () => app.doc.phases || [{ id: 'p0', name: 'Phase 1', objects: null }];
+  app.phaseIndex = () => (app.doc.phases ? app.doc.phase || 0 : 0);
+  app.phaseObjects = (i) => (i === app.phaseIndex() ? app.doc.objects : (app.phases()[i] || {}).objects || []);
+  app.allObjects = () => {
+    const out = app.doc.objects.slice();
+    if (app.doc.phases) app.doc.phases.forEach((ph, i) => i !== app.phaseIndex() && ph.objects && out.push(...ph.objects));
+    return out;
+  };
+  const clone = (list) => JSON.parse(JSON.stringify(list));
+
+  /* Neue Phase hinter der aktiven: Kopie der aktuellen Anordnung oder eine Vorlage */
+  app.addPhase = function (presetId, name) {
+    const cur = app.phaseIndex();
+    app.mutate((doc) => {
+      if (!doc.phases) {
+        // die bisherige Anordnung wird Phase 1 (benannt nach der Vorlage, falls es eine ist)
+        doc.phases = [{ id: LLR.newId(), name: LLR.PRESETS.some((p) => p.name === doc.name) ? doc.name : 'Phase 1', objects: null }];
+        doc.phase = 0;
+      }
+      let objs = clone(doc.objects);
+      let pname = name || 'Phase ' + (doc.phases.length + 1);
+      const preset = presetId && LLR.PRESETS.find((p) => p.id === presetId);
+      if (preset) {
+        objs = objs.filter((o) => !(isTable(o) || o.type === 'chair' || o.type === 'stool' || (preset.shelves && o.type === 'shelfRound')));
+        // vorhandene Tische/Stühle wiederverwenden (gleiche IDs), damit der Umbau sichtbar wird:
+        // jedes Möbelstück geht an die nächstgelegene neue Position desselben Typs
+        const old = doc.objects.filter((o) => isTable(o) || o.type === 'chair' || o.type === 'stool' || (preset.shelves && o.type === 'shelfRound'));
+        const added = app.buildPreset(preset, doc);
+        const pairs = [];
+        for (const a of old) for (const b of added) if (a.type === b.type) pairs.push({ a, b, d: G.dist(a, b) });
+        pairs.sort((x, y) => x.d - y.d);
+        const usedA = new Set();
+        const usedB = new Set();
+        for (const { a, b } of pairs) {
+          if (usedA.has(a) || usedB.has(b)) continue;
+          usedA.add(a);
+          usedB.add(b);
+          b.id = a.id;
+          if (a.color && b.type === 'chair') b.color = a.color;
+          if (a.foot) b.foot = a.foot;
+          if (a.learner) b.learner = a.learner;
+        }
+        objs.push(...added);
+        if (!name) pname = preset.name;
+      }
+      doc.phases[cur].objects = clone(doc.objects);
+      doc.phases.splice(cur + 1, 0, { id: LLR.newId(), name: pname, objects: null });
+      doc.objects = objs;
+      doc.phase = cur + 1;
+    });
+    app.sel = new Set();
+    app.emit('select');
+    app.emit('phase');
+  };
+
+  app.setPhase = function (i, opts) {
+    const cur = app.phaseIndex();
+    if (!app.doc.phases || i === cur || i < 0 || i >= app.doc.phases.length) return;
+    const from = app.doc.objects;
+    app.mutate((doc) => {
+      doc.phases[cur].objects = doc.objects;
+      doc.objects = doc.phases[i].objects || [];
+      doc.phases[i].objects = null;
+      doc.phase = i;
+    });
+    app.sel = new Set();
+    app.emit('select');
+    app.emit('phase');
+    if (opts && opts.animate) app.playTransition(from, app.doc.objects);
+  };
+
+  app.removePhase = function (i) {
+    if (!app.doc.phases) return;
+    const cur = app.phaseIndex();
+    app.mutate((doc) => {
+      if (i === cur) {
+        const next = i > 0 ? i - 1 : 1;
+        doc.objects = doc.phases[next].objects || [];
+        doc.phases[next].objects = null;
+        doc.phases.splice(i, 1);
+        doc.phase = next > i ? next - 1 : next;
+      } else {
+        doc.phases.splice(i, 1);
+        if (i < cur) doc.phase = cur - 1;
+      }
+      // eine einzelne Phase ist einfach der Plan
+      if (doc.phases.length < 2) {
+        delete doc.phases;
+        delete doc.phase;
+      }
+    });
+    app.sel = new Set();
+    app.emit('select');
+    app.emit('phase');
+  };
+
+  app.renamePhase = function (i, name) {
+    if (!app.doc.phases || !app.doc.phases[i]) return;
+    app.mutate((doc) => (doc.phases[i].name = String(name || '').trim().slice(0, 60) || 'Phase ' + (i + 1)));
+    app.emit('phase');
+  };
+
+  app.movePhase = function (i, dir) {
+    const j = i + dir;
+    if (!app.doc.phases || j < 0 || j >= app.doc.phases.length) return;
+    app.mutate((doc) => {
+      const ph = doc.phases;
+      [ph[i], ph[j]] = [ph[j], ph[i]];
+      if (doc.phase === i) doc.phase = j;
+      else if (doc.phase === j) doc.phase = i;
+    });
+    app.emit('phase');
+  };
+
+  /* Umbau von der vorigen Phase zur aktiven */
+  app.rebuildFromPrev = function () {
+    const i = app.phaseIndex();
+    if (!app.doc.phases || i === 0) return null;
+    return A.rebuild(app.phaseObjects(i - 1), app.doc.objects);
+  };
+
+  /* Übergang zwischen zwei Anordnungen abspielen: erst Tische und große Möbel,
+     dann die Stühle; weggeräumte Möbel blenden aus, neue ein. */
+  app.playTransition = function (fromObjs, toObjs, done) {
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || !fromObjs) {
+      if (done) done();
+      return;
+    }
+    if (app._anim) app._anim.finish();
+    const layer = el('g', { id: 'layer-anim', 'pointer-events': 'none' });
+    app.svg.insertBefore(layer, app.els.objects);
+    app.els.objects.style.display = 'none';
+    app.els.tags.style.display = 'none';
+    app.els.marks.style.display = 'none';
+    app.els.overlay.style.display = 'none';
+    const from = new Map(fromObjs.map((o) => [o.id, o]));
+    const to = new Map(toObjs.map((o) => [o.id, o]));
+    const items = [];
+    const mk = (o) => {
+      const g = el('g', {}, layer);
+      g.innerHTML = (def(o).shadow ? shadowMarkup(o) : '') + def(o).draw(o, S());
+      return g;
+    };
+    const sorted = [...new Set([...from.keys(), ...to.keys()])]
+      .map((id) => ({ a: from.get(id), b: to.get(id) }))
+      .sort((x, y) => def(x.b || x.a).layer - def(y.b || y.a).layer);
+    for (const { a, b } of sorted) {
+      const o = b || a;
+      const seat = o.type === 'chair' || o.type === 'stool';
+      const win = seat ? [0.35, 1] : [0, 0.68];
+      items.push({ g: mk(o), a: a || b, b: b || a, fade: !a ? 'in' : !b ? 'out' : null, win, sh: null });
+    }
+    for (const it of items) it.sh = it.g.querySelector('.shadow');
+    const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+    const D = 1700;
+    const t0 = performance.now();
+    let raf = 0;
+    const frame = (now) => {
+      const T0 = Math.min(1, (now - t0) / D);
+      for (const it of items) {
+        const t = ease(Math.max(0, Math.min(1, (T0 - it.win[0]) / (it.win[1] - it.win[0]))));
+        const x = it.a.x + (it.b.x - it.a.x) * t;
+        const y = it.a.y + (it.b.y - it.a.y) * t;
+        const r = (it.a.rot || 0) + G.normAngle((it.b.rot || 0) - (it.a.rot || 0)) * t;
+        it.g.setAttribute('transform', `translate(${f(x)} ${f(y)}) rotate(${f(r)})`);
+        if (it.sh) it.sh.setAttribute('transform', `rotate(${f(-r)}) translate(${SHADOW_OFF.x} ${SHADOW_OFF.y}) rotate(${f(r)})`);
+        if (it.fade === 'in') it.g.setAttribute('opacity', f(Math.max(0, (T0 - 0.6) / 0.4)));
+        if (it.fade === 'out') it.g.setAttribute('opacity', f(Math.max(0, 1 - T0 / 0.35)));
+      }
+      if (T0 < 1) raf = requestAnimationFrame(frame);
+      else finish();
+    };
+    const finish = () => {
+      cancelAnimationFrame(raf);
+      layer.remove();
+      app.els.objects.style.display = '';
+      app.els.tags.style.display = '';
+      app.els.marks.style.display = '';
+      app.els.overlay.style.display = '';
+      app.svg.removeEventListener('pointerdown', finish);
+      app._anim = null;
+      app.emit('anim', false);
+      if (done) done();
+    };
+    app._anim = { finish };
+    app.svg.addEventListener('pointerdown', finish);
+    app.emit('anim', true);
+    raf = requestAnimationFrame(frame);
+  };
+
   /* ---------- Raumgröße ---------- */
   app.roomSnapshot = () => ({
     w: app.doc.room.w,
     l: app.doc.room.l,
-    objs: app.doc.objects.map((o) => ({ o, x: o.x, y: o.y, bb: def(o).wall ? null : G.bbox([].concat(...app.worldParts(o))) })),
+    objs: app.allObjects().map((o) => ({ o, x: o.x, y: o.y, bb: def(o).wall ? null : G.bbox([].concat(...app.worldParts(o))) })),
   });
 
   /* sides: { l, t, r, b } in cm, positiv = Wand nach außen. Möbel an einer Wand
@@ -1390,6 +1787,13 @@
       app.drag = Object.assign(base, { kind: 'pan', view0: Object.assign({}, app.view), k0: app.px(), tapClears: false });
       return;
     }
+    // Sitzplan: Person ausgewählt, jetzt einen Platz antippen (Ziehen verschiebt die Ansicht)
+    if (app.placing) {
+      const hit = e.target.closest('[data-id]');
+      const o = hit && byId(hit.getAttribute('data-id'));
+      app.drag = Object.assign(base, { kind: 'place', seat: o && A.isSeat(o) ? o.id : null, view0: Object.assign({}, app.view), k0: app.px() });
+      return;
+    }
     if (app.mode === 'measure') {
       const a = snapMeasurePoint(p, e);
       app.measure = { a, b: a };
@@ -1589,7 +1993,7 @@
       dr.moved = true;
     }
     const p = app.toWorld(e.clientX, e.clientY);
-    if (dr.kind === 'pan') {
+    if (dr.kind === 'pan' || dr.kind === 'place') {
       app._autoFit = false;
       app.view.x = dr.view0.x - dxC * dr.k0;
       app.view.y = dr.view0.y - dyC * dr.k0;
@@ -1692,7 +2096,9 @@
     }
     if (e.pointerId !== dr.pointerId) return;
     if (EDIT_DRAGS.has(dr.kind) && dr.moved) finishMove();
-    else if (dr.tapId && !dr.moved) {
+    else if (dr.kind === 'place') {
+      if (!dr.moved) app.emit('place', dr.seat);
+    } else if (dr.tapId && !dr.moved) {
       // Doppelklick / Doppeltipp auf ein Objekt
       const now = performance.now();
       const last = app._lastTap;
@@ -1759,6 +2165,8 @@
         e.preventDefault();
         app.deleteSelected();
       }
+    } else if (k === 'Escape' && app.placing) {
+      app.emit('place', null);
     } else if (k === 'Escape') {
       const had = app.sel.size;
       if (app.mode !== 'select') app.setMode('select');
@@ -1800,9 +2208,18 @@
   };
 
   app.setOverlay = function (key, val) {
+    if (LENSES.includes(key)) return app.setLens(val ? key : null);
     app.overlay[key] = val;
     if (key === 'grid' || key === 'roomDims') app.renderRoom();
+    app.renderOverlay();
+    app.emit('overlay');
+  };
+
+  /* Prüfansicht wechseln (null = keine) */
+  app.setLens = function (key) {
+    for (const k of LENSES) app.overlay[k] = k === key;
     app.scheduleAnalysis(0);
+    app.renderAnalysisLayer();
     app.renderOverlay();
     app.emit('overlay');
   };

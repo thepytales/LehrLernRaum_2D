@@ -11,57 +11,94 @@ Tablet und Smartphone.
 
 ## Funktionen
 
+### Oberfläche
+
+- **Kopfzeile**: Planname, Rückgängig/Wiederholen, ein **Datei-Menü** (Neu, Pläne,
+  Bild, Drucken, Umbau- und Sitzplan drucken, Raum & Einstellungen) sowie „Teilen“.
+- **Links** eine Reiterleiste: *Möbel* (mit Suche, aufklappbaren Gruppen),
+  *Anordnungen*, *Lernende*, *Phasen* und *Im Raum*. Den aktiven Reiter erneut
+  antippen klappt die Bibliothek ein.
+- **Rechts** „Details | Prüfen“: Mit Auswahl stehen die Details des Objekts vorn –
+  samt seinen Prüfergebnissen –, ohne Auswahl Raum und Belegung bzw. die Prüfungen.
+- **Im Plan** oben die Werkzeuge, die vier Prüfansichten (Rollstuhl, Sicht,
+  Lehrkraft, Ruhe – immer eine zur Zeit) und ein Menü *Ansicht* für Abstände,
+  Raummaße, Raster und Einrasten. Bei mehreren Phasen oben rechts ein Umschalter.
+
+### Raum und Möbel
+
 - **Raum** in Draufsicht: 6,30 m × 8,00 m (≈ 50 m², Tafel an der kürzeren Seite).
-  Die Raumgröße lässt sich direkt im Plan ändern (an einer Wand oder an den blauen
-  Griffen ziehen, Möbel an der Wand wandern mit) oder als Maß eintippen. Grundausstattung nach der Room-Tour:
-  interaktive Tafel mit Tafelflügeln, Lehrertisch mit PC, Tür, Fenster mit Heizkörpern,
-  Schränke mit Wandbildschirm, Ablageturm, Sofa-Ecke mit Teppich und Sitzsäcken,
-  halbrunde Bücherregale, mobile Trennwand, Regale, Tablet-Wand.
+  Die Raumgröße lässt sich im Plan ändern (an einer Wand oder an den blauen Griffen
+  ziehen, Möbel an der Wand wandern mit) oder als Maß eintippen. Grundausstattung nach
+  der Room-Tour: interaktive Tafel mit Tafelflügeln, Lehrertisch mit PC, Tür, Fenster
+  mit Heizkörpern, Schränke mit Wandbildschirm, Ablageturm, Sofa-Ecke mit Teppich und
+  Sitzsäcken, halbrunde Bücherregale, mobile Trennwand, Regale, Tablet-Wand.
+- **Möbelgrafiken** nach den Fotos der Handreichung: Buche-Tischplatten mit Maserung,
+  Schalenstühle (orange-rot/grün) mit Griffloch auf Kufengestell, dunkelblaue
+  Wackelhocker, Ledersofas, Regale in Buche – mit weichem Schatten (Licht von links oben).
 - **Möbelkatalog** mit Bestandszählern laut Handreichung (12 Dreieckstische,
   19 Stühle, 2 Hocker, Sofa-Elemente …) – Überschreitungen werden markiert.
-  Zusätzlich Rechtecktische und eckige Teppiche in frei wählbarer Größe.
-- **Zonen** (eckig oder rund, farbig, mit Namen und Flächenangabe), z. B. Ruhezone,
-  Präsentation oder Gruppenarbeit. Die Fläche einer Zone bleibt frei bedienbar,
-  angefasst wird sie am Rand oder am Namensschild.
-- **Alle 13 Anordnungen der Handreichung** als Vorlagen (Seminarsitzordnung I–III,
-  Gesprächskreis, Stern, schmale/kompakte Tafel, U-Form, Oval, Hexagon & Dreieck,
-  großer Gruppentisch, Zweiertische, Einzelarbeitsplätze), danach frei anpassbar.
-- **Freies Einrichten**: Ziehen, Drehen (15°-Raster, Umschalt = frei), Größe ändern
-  an Griffen (Kanten und Ecken), Duplizieren, Sperren, Mehrfachauswahl (Tippen ins
-  Leere hebt sie auf), Beschriftungen (z. B. Namen für einen Sitzplan),
-  freie Objekte und Textnotizen.
-- **Magnetisches Einrasten**: Dreiecks- und Rechtecktische rasten Kante an Kante an,
-  angestellte Stühle wandern mit dem Tisch mit, Stühle drehen sich zum Tisch.
-  Mobile Trennwände rasten an den Enden aneinander ein (gerade, 45°/90° oder als T).
-  Doppelklick/Doppeltipp auf einen Tisch bzw. eine Trennwand wählt die ganze Gruppe.
-  Über das Magnet-Symbol lassen sich Einrasten, Mitnehmen der Stühle und Einrasten
-  am Raster (Rastergröße 10–100 cm) schnell an- und ausschalten.
+  Dazu Rechtecktische, Teppiche, Zonen, freie Objekte, Textnotizen und
+  **Lehrkraft-Positionen** für den Lehrkraft-Check.
+- **Alle 13 Anordnungen der Handreichung** als Vorlagen – in der aktuellen Phase
+  übernehmen oder als neue Unterrichtsphase anlegen.
+- **Freies Einrichten**: Ziehen, Drehen (15°-Raster, Umschalt = frei), Größe ändern,
+  Duplizieren, Sperren, Mehrfachauswahl, magnetisches Einrasten (Tischkanten,
+  Trennwände, Stühle zum Tisch), angestellte Stühle wandern mit, Doppelklick wählt die
+  ganze Tischgruppe.
+
+### Lernende & Sitzplan
+
+- Namen oder Kürzel einzeln oder als Liste einfügen; je Person **Bedarfe** (Hören,
+  Sehen, Rollstuhl, Ruhe, Bewegung, Unterstützung, kurzer Weg zur Tür) und
+  **Sitzwünsche** („sitzt gern neben“, „nicht neben“).
+- Plätze zuweisen: Person antippen und dann einen Platz, am Computer auch per
+  Ziehen – oder **automatisch verteilen** (Personen mit Bedarfen zuerst auf passende
+  Plätze, danach Verbesserung durch Tauschen).
+- Prüfung je Person mit Begründung, z. B. *Hören*: nah an Tafel und Lehrkraft,
+  Gesicht der Lehrkraft im Blick, eher ruhig. Für Rollstuhl-Bedarf lässt sich ein
+  Rollstuhlplatz an einer erreichbaren Tischkante einrichten.
+- Sitzplan drucken. Die Liste bleibt im Browser; beim Teilen per Link wird sie nur
+  auf ausdrücklichen Wunsch mitgeschickt.
+
+### Unterrichtsphasen & Umbau
+
+- Mehrere Anordnungen als **Phasen** einer Stunde (z. B. Stuhlkreis → Gruppenarbeit →
+  Präsentation); Raum, Lernende und Einstellungen gelten für alle.
+- **Animierter Übergang** beim Wechseln: erst Tische und große Möbel, dann Stühle.
+- **Umbauaufwand** je Phase (bewegte Tische/Stühle, Wege, grobe Zeitschätzung) und
+  ein **Umbauplan** im Plan und zum Drucken – mit nummerierter Reihenfolge, früheren
+  Positionen sowie neu hinzustellenden und wegzuräumenden Möbeln. Bei „Phase aus
+  Anordnung“ wandert jedes Möbelstück zur nächstgelegenen neuen Position.
+
+### Prüfungen (je eine Ansicht im Plan)
+
 - **Rollstuhl-Check** (vereinfacht nach DIN 18040-1): befahrbare Flächen ab der Tür
   (Durchgang ≥ 90 cm), Flächen zum Wenden (Ø 150 cm), zu enge Bereiche,
-  Rollstuhlplätze an Tischkanten – jeweils mit **Wegprüfung** von der Tür. Plätze,
-  die erst nach Wegstellen eines Stuhls frei werden, zählen nur, wenn mit allen
-  übrigen Stühlen ein Weg dorthin führt. Ein angetippter Tisch zeigt den Weg und
-  den wegzustellenden Stuhl im Plan. Zusätzlich ein Test-Rollstuhl
-  (70 × 120 cm, mit Wendekreis), der rot wird, sobald er aneckt, und seinen Weg
-  von der Tür anzeigt.
-- **Sicht-Check**: zeigt je Sitzplatz, ob Tafel, Wandbildschirm oder Beamer-Fläche
-  direkt, nur mit seitlich gedrehtem Kopf oder gar nicht im Blick sind
-  (Regale/Trennwände verdecken) und ob **Personen in der Sichtachse** sitzen.
-  Ein angetippter Sitzplatz zeigt seinen **Sichtkegel**: Blickfeld, sichtbare,
-  verdeckte und durch Personen eingeschränkte Teile jeder Präsentationsfläche,
-  Entfernung und nötige Kopfdrehung.
-- **Prüfen & Zählen** als aufklappbare Abschnitte: Ergebnisse stehen im
-  jeweiligen Abschnitt, der Schalter „Im Plan“ blendet die Darstellung ein und aus.
-- **Ansicht im Plan**: Abstände des gewählten Objekts zu den Nachbarn
-  (grün ≥ 90 cm), Raummaße am Rand und Raster lassen sich getrennt ein- und
-  ausblenden; dazu ein Messwerkzeug, das an Kanten einrastet.
-- **Speichern & Teilen**: automatische Sicherung im Browser, mehrere Pläne,
-  Export/Import als `.json`, Teilen-Link (der Plan steckt komplett im Link),
-  PNG-Export und Druckansicht (A4, auch als PDF).
-- **Bedienung** mit Maus, Touch (Ziehen, Pinch-Zoom) und Tastatur. Am Computer
-  lassen sich beide Seitenleisten einklappen; auf dem Tablet erscheinen sie als
-  Schubladen, auf dem Smartphone die Eigenschaften als Blatt von unten
-  (Details/Prüfen, nach unten wegwischen).
+  Rollstuhlplätze an Tischkanten mit geprüftem Weg; Test-Rollstuhl mit Wendekreis.
+- **Sicht** auf Tafel, Wandbildschirm und Beamer-Fläche je Sitzplatz – direkt, nur
+  mit gedrehtem Kopf, durch Personen eingeschränkt oder gar nicht; Sichtkegel am
+  angetippten Platz.
+- **Lehrkraft-Check**: Kommt die Lehrkraft an jeden Platz, um zu helfen (bequemer
+  Durchgang ≥ 50 cm, Engstellen ab 36 cm, notfalls über den Tisch)? Sieht sie das
+  Gesicht, nur das Profil oder den Rücken? Reichweite als Fläche im Plan, Weg zum
+  angetippten Platz. Ohne eigene Lehrkraft-Position wird ein Standort vor der Tafel
+  angenommen; mehrere Positionen (Doppelbesetzung, Schulbegleitung) sind möglich.
+- **Reiz- & Ruhe-Check**: Punkte für Nähe zur Tür und zur Lounge, Laufwege anderer
+  am Platz vorbei, viele Nachbarplätze, Blick aus dem Fenster und **Spiegelungen des
+  Fensters** auf Tafel und Bildschirmen. Regale und Trennwände dämpfen, Zonen namens
+  „Ruhezone“ oder „Rückzug“ gelten als ruhiger. Störquellen und Laufwege erscheinen
+  im Plan, am angetippten Platz die Gründe.
+- **Sitzplan & Bedarfe** und **Umbau** (bei Phasen) als weitere Ansichten.
+- Überschneidungen und Möbel außerhalb des Raums werden immer markiert.
+
+### Speichern & Teilen
+
+- Automatische Sicherung im Browser, mehrere Pläne, Export/Import als `.json`,
+  Teilen-Link (der Plan steckt komplett im Link, auch mit allen Phasen),
+  PNG-Export und Druckansichten (Plan, Umbauplan, Sitzplan; A4, auch als PDF).
+- Bedienung mit Maus, Touch (Ziehen, Pinch-Zoom) und Tastatur. Auf dem Tablet
+  erscheinen die Seitenleisten als Schubladen, auf dem Smartphone „Details/Prüfen“
+  als Blatt von unten.
 
 ## Auf GitHub Pages veröffentlichen
 
@@ -93,7 +130,9 @@ python3 -m http.server 8000
 | Grundausstattung des Raums (Positionen) | `js/presets.js` → `LLR.roomFurniture` |
 | Tischanordnungen | `js/presets.js` → `LLR.PRESETS` |
 | Möbeltypen, Maße, Bestand, Grafiken | `js/catalog.js` |
-| Rollstuhl-, Sicht- und Kollisionsprüfung | `js/analysis.js` |
+| Rollstuhl-, Sicht-, Lehrkraft-, Ruhe- und Kollisionsprüfung, Bedarfe, Umbau | `js/analysis.js` |
+| Darstellung der Prüfansichten im Plan | `js/lenses.js` |
+| Lernende, Sitzplan und Phasen (Oberfläche) | `js/ui-class.js` |
 
 ## Annahmen
 
@@ -107,3 +146,11 @@ python3 -m http.server 8000
   Je näher eine Person am eigenen Platz sitzt, desto mehr der Fläche verdeckt sie.
   Ab 25 % verdeckter Fläche gilt die Sicht als eingeschränkt. Die Annahme lässt sich
   im Abschnitt „Sicht“ abschalten; die Werte stehen in `js/analysis.js`.
+- Lehrkraft-Check und Laufwege: Eine gehende Person braucht bequem 50 cm (in den
+  Einstellungen änderbar), seitlich durchschieben geht ab 36 cm. Stühle zählen mit
+  ihrer Sitzfläche, weil man sie beim Vorbeigehen etwas heranrücken kann. Blickkontakt:
+  bis 60° zwischen Blickrichtung des Platzes und Lehrkraft = Gesicht, bis 110° = Profil.
+- Reiz- & Ruhe-Check: Punktwerte (Tür bis 30, Lounge 20, Laufwege 25, Nachbarplätze 15,
+  Fensterblick 10, Spiegelung 10, Ruhezone −20); unter 25 Punkten ruhig, ab 50 unruhig.
+  Ein Hilfsmittel zum Vergleichen von Anordnungen, keine Diagnose.
+- Umbauzeit: grob je Tisch 15 s, je Stuhl 6 s, Sofa 45 s, dazu der Weg (0,8 m/s).

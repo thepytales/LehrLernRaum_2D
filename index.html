@@ -6,7 +6,7 @@
     <title>LLR-Raumplaner 2D</title>
     <meta
       name="description"
-      content="2D-Raumplaner für den Lehr-Lern-Raum Inklusion (LLR) am ZLSB: Tische und Stühle frei anordnen, Anordnungen aus der Handreichung laden und die Rollstuhl-Befahrbarkeit prüfen."
+      content="2D-Raumplaner für den Lehr-Lern-Raum Inklusion (LLR) am ZLSB: Tische und Stühle frei anordnen, Anordnungen aus der Handreichung laden, Sitzplan und Unterrichtsphasen planen und Barrierefreiheit, Sicht, Laufwege und Ruhe prüfen."
     />
     <meta name="theme-color" content="#1F4AA8" />
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
@@ -61,6 +61,23 @@
         <symbol id="i-roomdims" viewBox="0 0 24 24"><rect x="6" y="9" width="15" height="12" rx="1" /><path d="M6 3v3.5M21 3v3.5M6 4.75h15M2.5 9H4M2.5 21H4M3.25 9v12" /></symbol>
         <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="2.5" /><circle cx="18" cy="5" r="2.5" /><path d="M8.5 19H16a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h7.5" stroke-dasharray="2.5 2.5" /></symbol>
         <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></symbol>
+        <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><circle cx="17" cy="9.2" r="2.6" /><path d="M16.5 14.2A5.5 5.5 0 0 1 21.5 19.5" /></symbol>
+        <symbol id="i-steps" viewBox="0 0 24 24"><rect x="2.5" y="4" width="7" height="7" rx="1.5" /><rect x="14.5" y="13" width="7" height="7" rx="1.5" /><path d="M9.5 7.5h3a2.5 2.5 0 0 1 2.5 2.5v3" /><path d="m13 11 2 2 2-2" /></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></symbol>
+        <symbol id="i-teacher" viewBox="0 0 24 24"><circle cx="7.5" cy="6.5" r="2.6" /><path d="M3 21v-6.5A3.5 3.5 0 0 1 6.5 11h2l4-2.5" /><rect x="12" y="3" width="9.5" height="7" rx="1" /><path d="M8.5 21v-5" /></symbol>
+        <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M5 19c-.5-7.5 4-13 15-14 .5 9-4.5 14.5-12 14.5" /><path d="M5 19 13 11" /></symbol>
+        <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z" /><path d="m3 13 9 5 9-5" /></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" /></symbol>
+        <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+        <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></symbol>
+        <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></symbol>
+        <symbol id="i-seat" viewBox="0 0 24 24"><path d="M6 4h12v8H6z" /><path d="M5 12h14l-1 4H6z" /><path d="M7 16v4M17 16v4" /></symbol>
+        <symbol id="i-n-hear" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 3.5-3 4.5-3 7.5a3 3 0 0 1-6 0" /><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0" /></symbol>
+        <symbol id="i-n-see" viewBox="0 0 24 24"><circle cx="6.5" cy="14" r="3.5" /><circle cx="17.5" cy="14" r="3.5" /><path d="M10 14h4M3 13l1.5-5h3M21 13l-1.5-5h-3" /></symbol>
+        <symbol id="i-n-move" viewBox="0 0 24 24"><ellipse cx="12" cy="7" rx="6" ry="2.5" /><path d="M12 9.5v6M8 20h8M10 15.5h4" /><path d="M3 5.5 5 7M21 5.5 19 7" /></symbol>
+        <symbol id="i-n-help" viewBox="0 0 24 24"><path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12M16 9.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-4.6-2.2L4 15.5a1.6 1.6 0 0 1 2.5-2L8 15" /></symbol>
+        <symbol id="i-n-exit" viewBox="0 0 24 24"><path d="M13 3H6v18h7" /><path d="M10 12h11M17 8l4 4-4 4" /></symbol>
       </defs>
     </svg>
 
@@ -70,14 +87,11 @@
       <button class="icon-btn only-mobile" id="btn-drawer" aria-label="Bibliothek öffnen" title="Bibliothek">
         <svg><use href="#i-menu" /></svg>
       </button>
-      <button class="icon-btn hide-mobile" id="btn-left" aria-controls="panel-left" aria-expanded="true" aria-label="Bibliothek links ein-/ausblenden" title="Bibliothek ein-/ausblenden">
-        <svg><use href="#i-side-left" /></svg>
-      </button>
       <div class="brand">
-        <img src="assets/icon.svg" alt="" width="28" height="28" />
+        <img src="assets/icon.svg" alt="" width="30" height="30" />
         <div class="brand-text">
           <strong>LLR-Raumplaner</strong>
-          <span>Lehr-Lern-Raum Inklusion · 2D</span>
+          <span>Lehr-Lern-Raum Inklusion</span>
         </div>
       </div>
       <label class="plan-name">
@@ -88,71 +102,78 @@
         <button class="icon-btn" id="btn-undo" aria-label="Rückgängig (Strg+Z)" title="Rückgängig (Strg+Z)"><svg><use href="#i-undo" /></svg></button>
         <button class="icon-btn" id="btn-redo" aria-label="Wiederholen (Strg+Y)" title="Wiederholen (Strg+Y)"><svg><use href="#i-redo" /></svg></button>
       </div>
-      <div class="tb-group hide-mobile">
-        <button class="btn ghost" id="btn-new" title="Neuer Plan"><svg><use href="#i-file-plus" /></svg><span>Neu</span></button>
-        <button class="btn ghost" id="btn-plans" title="Gespeicherte Pläne"><svg><use href="#i-folder" /></svg><span>Pläne</span></button>
-        <button class="btn ghost" id="btn-export" title="Als Bild speichern"><svg><use href="#i-image" /></svg><span>Bild</span></button>
-        <button class="btn ghost" id="btn-print" title="Drucken / als PDF"><svg><use href="#i-printer" /></svg><span>Drucken</span></button>
-        <button class="btn primary" id="btn-share" title="Link zum Plan teilen"><svg><use href="#i-link" /></svg><span>Teilen</span></button>
-      </div>
-      <button class="icon-btn only-mobile" id="btn-more" aria-label="Weitere Aktionen" title="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false">
-        <svg><use href="#i-more" /></svg>
+      <span class="tb-spacer"></span>
+      <button class="btn ghost" id="btn-file" aria-haspopup="menu" aria-expanded="false" aria-controls="file-menu" title="Neu, Speichern, Bild, Drucken, Einstellungen">
+        <svg class="hide-phone"><use href="#i-folder" /></svg><svg class="phone-only-icon"><use href="#i-more" /></svg><span>Datei</span><svg class="chev-sm"><use href="#i-chevron" /></svg>
       </button>
-      <button class="icon-btn hide-phone" id="btn-settings" aria-label="Raum & Einstellungen" title="Raum & Einstellungen"><svg><use href="#i-sliders" /></svg></button>
+      <button class="btn primary" id="btn-share" title="Link zum Plan teilen"><svg><use href="#i-link" /></svg><span>Teilen</span></button>
       <button class="icon-btn hide-phone" id="btn-help" aria-label="Hilfe" title="Hilfe"><svg><use href="#i-help" /></svg></button>
-      <button class="icon-btn hide-mobile" id="btn-right" aria-controls="panel-right" aria-expanded="true" aria-label="Eigenschaften rechts ein-/ausblenden" title="Eigenschaften & Prüfen ein-/ausblenden">
+      <button class="icon-btn hide-mobile" id="btn-right" aria-controls="panel-right" aria-expanded="true" aria-label="Seitenleiste rechts ein-/ausblenden" title="Details & Prüfen ein-/ausblenden">
         <svg><use href="#i-side-right" /></svg>
       </button>
-      <div class="menu" id="more-menu" role="menu" hidden>
-        <button role="menuitem" data-act="new"><svg><use href="#i-file-plus" /></svg>Neuer Plan</button>
-        <button role="menuitem" data-act="plans"><svg><use href="#i-folder" /></svg>Gespeicherte Pläne</button>
-        <button role="menuitem" data-act="export"><svg><use href="#i-image" /></svg>Als Bild speichern</button>
+      <div class="menu" id="file-menu" role="menu" hidden>
+        <button role="menuitem" data-act="new"><svg><use href="#i-file-plus" /></svg>Neuer Plan …</button>
+        <button role="menuitem" data-act="plans"><svg><use href="#i-folder" /></svg>Pläne speichern &amp; öffnen …</button>
+        <hr />
+        <button role="menuitem" data-act="export"><svg><use href="#i-image" /></svg>Als Bild speichern (PNG)</button>
         <button role="menuitem" data-act="print"><svg><use href="#i-printer" /></svg>Drucken / PDF</button>
-        <button role="menuitem" data-act="share"><svg><use href="#i-link" /></svg>Link teilen</button>
-        <button role="menuitem" class="phone-only" data-act="settings"><svg><use href="#i-sliders" /></svg>Raum & Einstellungen</button>
+        <button role="menuitem" data-act="printRebuild" hidden><svg><use href="#i-steps" /></svg>Umbauplan drucken</button>
+        <button role="menuitem" data-act="printSeating" hidden><svg><use href="#i-users" /></svg>Sitzplan drucken</button>
+        <hr />
+        <button role="menuitem" data-act="settings"><svg><use href="#i-sliders" /></svg>Raum &amp; Einstellungen …</button>
         <button role="menuitem" class="phone-only" data-act="help"><svg><use href="#i-help" /></svg>Hilfe</button>
       </div>
     </header>
 
     <div class="workspace">
       <aside class="panel panel-left" id="panel-left" aria-label="Bibliothek">
-        <div class="drawer-head only-mobile">
-          <strong>Bibliothek</strong>
-          <button class="icon-btn" data-close="left" aria-label="Schließen"><svg><use href="#i-x" /></svg></button>
+        <nav class="activity" role="tablist" aria-orientation="vertical" aria-label="Bibliothek">
+          <button role="tab" id="tab-btn-catalog" aria-controls="tab-catalog" aria-selected="true" data-tab="catalog" title="Möbel hinzufügen"><svg><use href="#i-box" /></svg><span>Möbel</span></button>
+          <button role="tab" id="tab-btn-presets" aria-controls="tab-presets" aria-selected="false" data-tab="presets" tabindex="-1" title="Anordnungen aus der Handreichung"><svg><use href="#i-layout" /></svg><span>Anord&shy;nungen</span></button>
+          <button role="tab" id="tab-btn-learners" aria-controls="tab-learners" aria-selected="false" data-tab="learners" tabindex="-1" title="Lernende und Sitzplan"><svg><use href="#i-users" /></svg><span>Lernende</span></button>
+          <button role="tab" id="tab-btn-phases" aria-controls="tab-phases" aria-selected="false" data-tab="phases" tabindex="-1" title="Unterrichtsphasen und Umbau"><svg><use href="#i-steps" /></svg><span>Phasen</span></button>
+          <button role="tab" id="tab-btn-objects" aria-controls="tab-objects" aria-selected="false" data-tab="objects" tabindex="-1" title="Alle Objekte im Raum"><svg><use href="#i-list" /></svg><span>Im Raum</span></button>
+        </nav>
+        <div class="lib">
+          <div class="lib-head">
+            <h2 id="lib-title">Möbel</h2>
+            <button class="icon-btn" id="btn-lib-close" aria-label="Bibliothek schließen" title="Bibliothek einklappen"><svg><use href="#i-chev-left" /></svg></button>
+          </div>
+          <div class="tab-body" id="tab-catalog" role="tabpanel" aria-labelledby="tab-btn-catalog"></div>
+          <div class="tab-body" id="tab-presets" role="tabpanel" aria-labelledby="tab-btn-presets" hidden></div>
+          <div class="tab-body" id="tab-learners" role="tabpanel" aria-labelledby="tab-btn-learners" hidden></div>
+          <div class="tab-body" id="tab-phases" role="tabpanel" aria-labelledby="tab-btn-phases" hidden></div>
+          <div class="tab-body" id="tab-objects" role="tabpanel" aria-labelledby="tab-btn-objects" hidden></div>
         </div>
-        <div class="tabs" role="tablist" aria-label="Bibliothek">
-          <button role="tab" id="tab-btn-catalog" aria-controls="tab-catalog" aria-selected="true" data-tab="catalog"><svg><use href="#i-box" /></svg>Möbel</button>
-          <button role="tab" id="tab-btn-presets" aria-controls="tab-presets" aria-selected="false" data-tab="presets" tabindex="-1"><svg><use href="#i-layout" /></svg>Anordnungen</button>
-          <button role="tab" id="tab-btn-objects" aria-controls="tab-objects" aria-selected="false" data-tab="objects" tabindex="-1"><svg><use href="#i-list" /></svg>Im Raum</button>
-        </div>
-        <div class="tab-body" id="tab-catalog" role="tabpanel" aria-labelledby="tab-btn-catalog"></div>
-        <div class="tab-body" id="tab-presets" role="tabpanel" aria-labelledby="tab-btn-presets" hidden></div>
-        <div class="tab-body" id="tab-objects" role="tabpanel" aria-labelledby="tab-btn-objects" hidden></div>
       </aside>
 
       <main class="stage" id="stage">
         <div class="tool-rail" role="toolbar" aria-label="Werkzeuge">
           <div class="rail-group">
-            <button class="tool" data-mode="select" aria-pressed="true" title="Auswählen & verschieben (Esc)"><svg><use href="#i-pointer" /></svg><span>Auswählen</span></button>
+            <button class="tool" data-mode="select" aria-pressed="true" title="Auswählen &amp; verschieben (Esc)"><svg><use href="#i-pointer" /></svg><span>Auswählen</span></button>
             <button class="tool" id="tool-multi" aria-pressed="false" title="Mehrfachauswahl: tippen fügt hinzu, Rahmen aufziehen"><svg><use href="#i-multi" /></svg><span>Mehrfach</span></button>
             <button class="tool" data-mode="measure" aria-pressed="false" title="Messen (M): Linie ziehen"><svg><use href="#i-ruler" /></svg><span>Messen</span></button>
           </div>
-          <div class="rail-group" aria-label="Barrierefreiheit & Inklusion">
-            <button class="tool" data-overlay="access" aria-pressed="false" title="Rollstuhl-Check im Plan ein/aus"><svg><use href="#i-wheelchair" /></svg><span>Rollstuhl</span></button>
-            <button class="tool" data-overlay="sight" aria-pressed="false" title="Sicht auf Tafel & Bildschirme im Plan ein/aus"><svg><use href="#i-eye" /></svg><span>Sicht</span></button>
+          <div class="rail-group lens-group" role="group" aria-label="Prüfansicht im Plan (eine zur Zeit)">
+            <button class="tool" data-lens="access" aria-pressed="false" title="Rollstuhl-Check: befahrbare Flächen und Rollstuhlplätze"><svg><use href="#i-wheelchair" /></svg><span>Rollstuhl</span></button>
+            <button class="tool" data-lens="sight" aria-pressed="false" title="Sicht auf Tafel &amp; Bildschirme"><svg><use href="#i-eye" /></svg><span>Sicht</span></button>
+            <button class="tool" data-lens="teacher" aria-pressed="false" title="Lehrkraft-Check: Laufwege und Blickkontakt"><svg><use href="#i-teacher" /></svg><span>Lehrkraft</span></button>
+            <button class="tool" data-lens="calm" aria-pressed="false" title="Reiz- &amp; Ruhe-Check: ruhige und unruhige Plätze"><svg><use href="#i-leaf" /></svg><span>Ruhe</span></button>
           </div>
-          <div class="rail-group" aria-label="Ansicht">
-            <button class="tool" data-overlay="dims" aria-pressed="true" title="Abstände des ausgewählten Objekts zu den Nachbarn ein/aus"><svg><use href="#i-dims" /></svg><span>Abstände</span></button>
-            <button class="tool" data-overlay="roomDims" aria-pressed="true" title="Raummaße am Rand ein/aus"><svg><use href="#i-roomdims" /></svg><span>Raummaße</span></button>
-            <button class="tool" data-overlay="grid" aria-pressed="true" title="Raster ein/aus"><svg><use href="#i-grid" /></svg><span>Raster</span></button>
-            <button class="tool" id="tool-snap" aria-haspopup="dialog" aria-expanded="false" aria-controls="snap-pop" title="Einrasten, Stühle mitnehmen, Raster"><svg><use href="#i-magnet" /></svg><span>Einrasten</span></button>
+          <div class="rail-group">
+            <button class="tool" id="tool-view" aria-haspopup="dialog" aria-expanded="false" aria-controls="view-pop" title="Ansicht und Einrasten"><svg><use href="#i-layers" /></svg><span>Ansicht</span></button>
           </div>
         </div>
 
-        <div class="popover" id="snap-pop" role="dialog" aria-label="Einrasten und Raster" hidden>
+        <div class="popover" id="view-pop" role="dialog" aria-label="Ansicht und Einrasten" hidden>
+          <div class="pop-title">Im Plan zeigen</div>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-dims" /></svg><span class="lbl">Abstände<small>am ausgewählten Objekt · grün ≥ 90 cm</small></span><input type="checkbox" class="switch" data-ov="dims" aria-label="Abstände" /></label>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-roomdims" /></svg><span class="lbl">Raummaße<small>Breite, Länge und Fläche am Rand</small></span><input type="checkbox" class="switch" data-ov="roomDims" aria-label="Raummaße" /></label>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-grid" /></svg><span class="lbl">Raster</span><input type="checkbox" class="switch" data-ov="grid" aria-label="Raster" /></label>
+          <div class="pop-title">Einrasten</div>
           <label class="switch-row"><svg aria-hidden="true"><use href="#i-magnet" /></svg><span class="lbl">Magnetisch einrasten<small>Tischkanten, Trennwände, Wände, Stuhl zum Tisch</small></span><input type="checkbox" class="switch" data-pref="snap" aria-label="Magnetisch einrasten" /></label>
           <label class="switch-row"><svg aria-hidden="true"><use href="#i-carry" /></svg><span class="lbl">Stühle wandern mit<small>Angestellte Stühle folgen dem Tisch</small></span><input type="checkbox" class="switch" data-pref="carryChairs" aria-label="Stühle wandern mit" /></label>
-          <label class="switch-row"><svg aria-hidden="true"><use href="#i-grid" /></svg><span class="lbl">Am Raster einrasten<small>Möbel springen auf die Rasterlinien</small></span><input type="checkbox" class="switch" data-pref="gridSnap" aria-label="Am Raster einrasten" /></label>
+          <label class="switch-row"><svg aria-hidden="true"><use href="#i-grid" /></svg><span class="lbl">Am Raster einrasten</span><input type="checkbox" class="switch" data-pref="gridSnap" aria-label="Am Raster einrasten" /></label>
           <div class="pop-row">
             <span>Rastergröße</span>
             <div class="seg" role="group" aria-label="Rastergröße in cm">
@@ -164,6 +185,12 @@
         </div>
 
         <svg id="plan" role="application" aria-label="Raumplan in Draufsicht. Objekte mit Maus oder Finger verschieben; Tastatur: Pfeiltasten verschieben, R dreht, Entf löscht." tabindex="0"></svg>
+
+        <div class="phase-bar" id="phase-bar" role="group" aria-label="Unterrichtsphase" hidden>
+          <button class="icon-btn" data-ph="prev" aria-label="Vorige Phase" title="Vorige Phase (mit Übergang)"><svg><use href="#i-chev-left" /></svg></button>
+          <button class="ph-name" data-ph="open" title="Phasen verwalten"><small id="phase-num"></small><span id="phase-name"></span></button>
+          <button class="icon-btn" data-ph="next" aria-label="Nächste Phase" title="Nächste Phase (mit Übergang)"><svg><use href="#i-chev-right" /></svg></button>
+        </div>
 
         <div class="legend" id="legend" hidden></div>
         <div class="stage-hint" id="stage-hint" hidden></div>
@@ -185,23 +212,24 @@
         </div>
       </main>
 
-      <aside class="panel panel-right" id="panel-right" aria-label="Eigenschaften und Prüfungen" tabindex="-1">
-        <div class="drawer-head sheet-head only-mobile">
+      <aside class="panel panel-right" id="panel-right" aria-label="Details und Prüfungen" tabindex="-1">
+        <div class="right-head">
           <span class="grab" aria-hidden="true"></span>
-          <div class="seg sheet-tabs" role="group" aria-label="Ansicht wählen">
-            <button type="button" data-view="props" aria-pressed="true">Details</button><button type="button" data-view="checks" aria-pressed="false">Prüfen</button>
+          <div class="seg right-tabs" role="group" aria-label="Ansicht wählen">
+            <button type="button" data-view="props" aria-pressed="true">Details</button><button type="button" data-view="checks" aria-pressed="false">Prüfen<span class="tab-badge" id="checks-badge" hidden></span></button>
           </div>
-          <button class="icon-btn" data-close="right" aria-label="Schließen"><svg><use href="#i-x" /></svg></button>
+          <button class="icon-btn only-mobile" data-close="right" aria-label="Schließen"><svg><use href="#i-x" /></svg></button>
         </div>
         <section id="props" aria-live="off"></section>
-        <section id="checks"></section>
+        <section id="checks" hidden></section>
       </aside>
     </div>
 
     <nav class="mobile-bar only-mobile" aria-label="Schnellzugriff">
       <button data-open="catalog"><svg><use href="#i-box" /></svg><span>Möbel</span></button>
       <button data-open="presets"><svg><use href="#i-layout" /></svg><span>Anordnungen</span></button>
-      <button data-open="checks"><svg><use href="#i-wheelchair" /></svg><span>Prüfen</span></button>
+      <button data-open="learners"><svg><use href="#i-users" /></svg><span>Lernende</span></button>
+      <button data-open="checks"><svg><use href="#i-check" /></svg><span>Prüfen</span></button>
       <button data-open="props"><svg><use href="#i-panel" /></svg><span>Details</span></button>
     </nav>
 
@@ -227,6 +255,8 @@
     <script src="js/presets.js"></script>
     <script src="js/analysis.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/lenses.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/ui-class.js"></script>
   </body>
 </html>
