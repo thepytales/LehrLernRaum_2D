@@ -9,7 +9,17 @@
   const app = LLR.app;
   const f = (v) => Math.round(v * 100) / 100;
   const pt = (p) => `${f(p.x)} ${f(p.y)}`;
-  const LEVEL = ['#2F9E44', '#F59F00', '#E03131'];
+  /* Statusfarben gut / eingeschränkt / Problem – je nach Darstellung (js/boot.js) */
+  const LEVEL = [];
+  const syncLevel = () => {
+    const p = LLR.prefs ? LLR.prefs.pal() : { good: '#2F9E44', warn: '#F59F00', bad: '#E03131' };
+    LEVEL[0] = p.good;
+    LEVEL[1] = p.warn;
+    LEVEL[2] = p.bad;
+  };
+  syncLevel();
+  /* Größe der Marken und Etiketten (Schriftgröße, Kontrast) */
+  const ms = () => (LLR.prefs ? LLR.prefs.markScale() : 1);
   const TEAL = '#0C8599';
   const ORANGE = '#E8590C';
 
@@ -19,12 +29,13 @@
     bang: '<path d="M0 -3.8 v3.9" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cy="3.2" r="1.1" fill="#fff"/>',
     x: '<path d="M-2.6 -2.6 l5.2 5.2 m0 -5.2 l-5.2 5.2" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>',
     back: '<path d="M2.8 -2.2 A3.6 3.6 0 1 0 3.3 2" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><path d="M3.6 -4.4 v2.6 h-2.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
-    leaf: '<path d="M-3.6 3.6 C-3.8 -1.6 -0.6 -4.2 4 -4 C4.2 0.6 1.6 3.8 -3.6 3.6 Z" fill="#fff"/><path d="M-3 3 L1.6 -1.6" stroke="' + LEVEL[0] + '" stroke-width="0.9" stroke-linecap="round"/>',
+    leaf: '<path d="M-3.6 3.6 C-3.8 -1.6 -0.6 -4.2 4 -4 C4.2 0.6 1.6 3.8 -3.6 3.6 Z" fill="#fff"/><path d="M-3 3 L1.6 -1.6" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/>',
     wave: '<path d="M-4.4 0.8 q1.1 -2.4 2.2 0 t2.2 0 t2.2 0 t2.2 0" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>',
     bolt: '<path d="M0.9 -4.6 L-2.8 0.7 H-0.1 L-0.9 4.6 L2.8 -0.7 H0.1 Z" fill="#fff"/>',
   };
-  LLR.statusGlyph = (level, sym) => `<circle r="7" fill="${LEVEL[level]}" stroke="#fff" stroke-width="1.6"/>${SYM[sym] || ''}`;
+  LLR.statusGlyph = (level, sym) => `<g color="${LEVEL[level]}"><circle r="7" fill="${LEVEL[level]}" stroke="#fff" stroke-width="1.6"/>${SYM[sym] || ''}</g>`;
   LLR.STATUS_COLORS = LEVEL;
+  LLR.syncStatusColors = syncLevel;
 
   const TEACHER_GLYPH = { good: [0, 'check'], side: [1, 'bang'], back: [1, 'back'], none: [2, 'x'] };
   const CALM_GLYPH = { calm: [0, 'leaf'], mid: [1, 'wave'], busy: [2, 'bolt'] };
@@ -34,7 +45,7 @@
   /* Marke am aktuellen Ort des Objekts (folgt beim Ziehen) */
   const at = (id, fallback, k, inner) => {
     const o = app.byId(id) || fallback;
-    return `<g transform="translate(${pt(o)}) scale(${f(Math.max(1, k))})">${inner}</g>`;
+    return `<g transform="translate(${pt(o)}) scale(${f(Math.max(1, k) * ms())})">${inner}</g>`;
   };
 
   function route(pts, color, k) {
@@ -50,7 +61,7 @@
 
   function chip(p, k, text, color) {
     const wpx = text.length * 6.6 + 16;
-    return `<g transform="translate(${pt(p)}) scale(${f(k)})"><rect x="${f(-wpx / 2)}" y="-11" width="${f(wpx)}" height="22" rx="11" fill="${color}"/><text y="0.5" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(text)}</text></g>`;
+    return `<g transform="translate(${pt(p)}) scale(${f(k * ms())})"><rect x="${f(-wpx / 2)}" y="-11" width="${f(wpx)}" height="22" rx="11" fill="${color}"/><text y="0.5" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(text)}</text></g>`;
   }
 
   const selectedSeats = () => app.selectedObjects().filter(A.isSeat);
@@ -138,7 +149,7 @@
       if (r.checks.length) {
         h += `<circle cx="${f(o.x)}" cy="${f(o.y)}" r="${rad}" fill="${LEVEL[r.st]}" fill-opacity="0.12" stroke="${LEVEL[r.st]}" stroke-width="${f(2.2 * k)}"/>`;
         const sym = r.st === 0 ? 'check' : r.st === 1 ? 'bang' : 'x';
-        h += `<g transform="translate(${f(o.x + rad * 0.72)} ${f(o.y - rad * 0.72)}) scale(${f(Math.max(1, k))})">${LLR.statusGlyph(r.st, sym)}</g>`;
+        h += `<g transform="translate(${f(o.x + rad * 0.72)} ${f(o.y - rad * 0.72)}) scale(${f(Math.max(1, k) * ms())})">${LLR.statusGlyph(r.st, sym)}</g>`;
       } else {
         h += `<circle cx="${f(o.x)}" cy="${f(o.y)}" r="${rad}" fill="#1F4AA8" fill-opacity="0.06" stroke="#1F4AA8" stroke-opacity="0.45" stroke-width="${f(1.4 * k)}"/>`;
       }

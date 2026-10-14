@@ -428,8 +428,9 @@
   }
 
   /* ---------- Karten unter „Prüfen“ ---------- */
-  function checkCards(lensCard) {
+  function checkCards(lensCard, simple) {
     let h = '';
+    const Q = LLR.QUESTIONS || {};
     const list = app.learners();
     if (list.length) {
       const res = fit();
@@ -437,7 +438,9 @@
       const open = res.filter((r) => r.st === 2).length;
       const part = res.filter((r) => r.st === 1).length;
       const lv = open ? 2 : part || placed < list.length ? 1 : 0;
-      h += lensCard('seating', 'i-users', 'Sitzplan & Bedarfe', `${placed}/${list.length} mit Platz${open ? ` · ${open} offen` : ''}${part ? ` · ${part} teilweise` : ''}`, lv, () => {
+      const sumPro = `${placed}/${list.length} mit Platz${open ? ` · ${open} offen` : ''}${part ? ` · ${part} teilweise` : ''}`;
+      const sumSimple = placed < list.length ? `Noch nicht – ${list.length - placed} von ${list.length} haben keinen Platz.` : open ? `Nicht ganz – bei ${open} ${open === 1 ? 'Person passt' : 'Personen passt'} der Platz nicht.` : part ? `Fast – bei ${part} ${part === 1 ? 'Person' : 'Personen'} nur teilweise.` : 'Ja – alle Bedarfe und Sitzwünsche sind erfüllt.';
+      h += lensCard('seating', 'i-users', simple ? Q.seating : 'Sitzplan & Bedarfe', simple ? sumSimple : sumPro, lv, () => {
         let b = '';
         const issues = res.filter((r) => r.st >= 1 || !r.seat);
         if (!issues.length) b += `<div class="check-row ok">${icon('i-check')}<span class="txt">Alle Bedarfe und Sitzwünsche sind erfüllt.</span></div>`;
@@ -460,7 +463,8 @@
       const i = app.phaseIndex();
       const rb = rebuildBetween(i);
       const prev = app.phases()[i - 1].name;
-      h += lensCard('rebuild', 'i-steps', `Umbau von „${esc(prev)}“`, rebuildLine(rb), rb.changes ? (rb.sec > 600 ? 1 : 0) : 0, () => {
+      const simpleSum = rb.changes ? `Ca. ${minutes(rb.sec / 4 + 30)} Minuten zu viert – von „${esc(prev)}“ aus.` : 'Kein Umbau nötig.';
+      h += lensCard('rebuild', 'i-steps', simple ? Q.rebuild : `Umbau von „${esc(prev)}“`, simple ? simpleSum : rebuildLine(rb), rb.changes ? (rb.sec > 600 ? 1 : 0) : 0, () => {
         let b = `<table class="stat-table"><tr><td>Tische</td><td>${rb.tables}</td></tr><tr><td>Stühle und Hocker</td><td>${rb.seats}</td></tr><tr><td>Weitere Möbel</td><td>${rb.other}</td></tr><tr><td>Wege zusammen</td><td>${ui().m1(rb.distSum)}</td></tr><tr><td>Zeit allein / zu viert</td><td>ca. ${minutes(rb.sec)} / ${minutes(rb.sec / 4 + 30)} min</td></tr></table>`;
         const steps = LLR.rebuildSteps(rb);
         if (steps.length) b += `<div class="sub-title">Reihenfolge (Nummern im Plan)</div><ol class="steps">${steps.slice(0, 12).map((s) => `<li>${esc(s.text)}</li>`).join('')}${steps.length > 12 ? `<li>… und ${steps.length - 12} weitere</li>` : ''}</ol>`;
@@ -600,5 +604,7 @@
     checkCards,
     printTable,
     act,
+    paste: () => pasteDialog(),
+    autoSeat: () => autoSeat(),
   };
 })((window.LLR = window.LLR || {}));

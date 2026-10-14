@@ -293,6 +293,7 @@
 
   P.push({
     id: 'seminar1',
+    forms: ['gruppe', 'partner'],
     name: 'Seminarsitzordnung I',
     persons: '21–24 Personen',
     page: 4,
@@ -314,6 +315,7 @@
 
   P.push({
     id: 'seminar2',
+    forms: ['gruppe'],
     name: 'Seminarsitzordnung II',
     persons: '21 Personen',
     page: 5,
@@ -332,6 +334,7 @@
 
   P.push({
     id: 'seminar3',
+    forms: ['gruppe', 'einzel'],
     name: 'Seminarsitzordnung III',
     persons: '17 Personen',
     page: 6,
@@ -354,6 +357,7 @@
 
   P.push({
     id: 'kreis',
+    forms: ['kreis'],
     name: 'Gesprächskreis',
     persons: '8 Personen (erweiterbar)',
     page: 7,
@@ -367,6 +371,7 @@
 
   P.push({
     id: 'stern',
+    forms: ['kreis'],
     name: 'Gesprächskreis als Stern',
     persons: '8 Personen (erweiterbar)',
     page: 8,
@@ -380,6 +385,7 @@
 
   P.push({
     id: 'schmal',
+    forms: ['plenum', 'kreis'],
     name: 'Schmale Tafel',
     persons: '10 Personen (erweiterbar)',
     page: 9,
@@ -395,6 +401,7 @@
 
   P.push({
     id: 'kompakt',
+    forms: ['plenum', 'gruppe'],
     name: 'Kompakte Tafel',
     persons: '10 Personen',
     page: 10,
@@ -412,6 +419,7 @@
 
   P.push({
     id: 'uform',
+    forms: ['plenum', 'kreis'],
     name: 'Plenum in U-Form',
     persons: '12 Personen',
     page: 11,
@@ -433,6 +441,7 @@
 
   P.push({
     id: 'oval',
+    forms: ['kreis', 'plenum'],
     name: 'Plenum im Oval',
     persons: '9 Personen',
     page: 12,
@@ -488,6 +497,7 @@
 
   P.push({
     id: 'hexdrei',
+    forms: ['gruppe'],
     name: 'Gruppentischkombination Hexagon und Dreieck',
     persons: '12 Personen',
     page: 13,
@@ -503,6 +513,7 @@
 
   P.push({
     id: 'quadrat',
+    forms: ['gruppe', 'kreis'],
     name: 'Großer Gruppentisch als Quadrat',
     persons: '8 Personen',
     page: 14,
@@ -520,6 +531,7 @@
 
   P.push({
     id: 'zweier',
+    forms: ['partner'],
     name: 'Verschiedene Zweiertischkonstellationen',
     persons: '12 Personen',
     page: 15,
@@ -542,6 +554,7 @@
 
   P.push({
     id: 'einzel',
+    forms: ['einzel'],
     name: 'Verschiedene Einzelarbeitsplätze',
     persons: '12 Personen',
     page: 16,
@@ -577,6 +590,159 @@
   });
 
   LLR.PRESETS = P;
+
+  /* Sozialformen (Assistent und Filter im Reiter „Anordnungen“) */
+  LLR.FORMS = [
+    { id: 'einzel', name: 'Einzelarbeit' },
+    { id: 'partner', name: 'Partnerarbeit' },
+    { id: 'gruppe', name: 'Gruppenarbeit' },
+    { id: 'kreis', name: 'Gesprächskreis' },
+    { id: 'plenum', name: 'Plenum & Präsentation' },
+  ];
+
+  /* Anzahl der Sitzplätze einer Anordnung (einmal berechnet) */
+  const seatCache = new Map();
+  LLR.presetSeats = function (p) {
+    if (p.seats !== undefined) return p.seats;
+    if (!seatCache.has(p.id)) {
+      let n = 0;
+      try {
+        n = p.build(LLR.DEFAULT_SETTINGS, LLR.DEFAULT_ROOM).filter((o) => T[o.type] && T[o.type].seats).length;
+      } catch (e) {
+        n = 0;
+      }
+      seatCache.set(p.id, n);
+    }
+    return seatCache.get(p.id);
+  };
+
+  /* ---------- Bausteine: fertige Tischgruppen mit Stühlen ----------
+     Werden mit einem Zug eingefügt (js/precision.js → app.addGroup). */
+  LLR.BLOCKS = [
+    {
+      id: 'b-einzel',
+      name: 'Einzeltisch',
+      desc: '1 Dreieckstisch, 1 Stuhl an der langen Seite',
+      build(S) {
+        const t = tri(S, 0, 0, 0, -1);
+        return [t, seatAtEdge(S, t, 0)];
+      },
+    },
+    {
+      id: 'b-partner',
+      name: 'Partnertisch nebeneinander',
+      desc: '2 Tische als Dreieck, 2 Stühle nebeneinander',
+      build: (S) => group(S, bigTri2(S), [[90, [0.3, 0.7]]], 0, 0, 0),
+    },
+    {
+      id: 'b-partner2',
+      name: 'Partnertisch gegenüber',
+      desc: '2 Tische im Zick-Zack, 2 Stühle gegenüber',
+      build: (S) => group(S, strip(S, 2), [[-90], [90]], 0, 0, 0),
+    },
+    {
+      id: 'b-gruppe4',
+      name: 'Gruppentisch für 4',
+      desc: '2 Tische als Quadrat, 4 Stühle',
+      build: (S) => group(S, square2(S, false), [[-90], [0], [90], [180]], 0, 0, 0),
+    },
+    {
+      id: 'b-gruppe5',
+      name: 'Gruppentisch für 5',
+      desc: '3 Tische im Zick-Zack, 5 Stühle',
+      build: (S) => group(S, strip(S, 3), [[-90, [1 / 6, 0.5, 5 / 6]], [135], [45]], 0, 0, 0),
+    },
+    {
+      id: 'b-gruppe6',
+      name: 'Gruppentisch für 6',
+      desc: '6 Tische als Sechseck, 6 Stühle',
+      build: (S) => group(S, hexagon6(S), [[-90], [90], [-45], [-135], [45], [135]], 0, 0, 0),
+    },
+    {
+      id: 'b-gruppe8',
+      name: 'Großer Gruppentisch für 8',
+      desc: '8 Tische als Quadrat, 8 Stühle',
+      build(S) {
+        const L = Math.hypot(S.tableBase / 2, S.tableHeight);
+        const tables = [];
+        for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) tables.push(...place(square2(S, false), (c - 0.5) * L, (r - 0.5) * L, (r + c) % 2 ? 90 : 0));
+        return group(S, tables, [[-90, [0.25, 0.75]], [90, [0.25, 0.75]], [180, [0.25, 0.75]], [0, [0.25, 0.75]]], 0, 0, 0);
+      },
+    },
+    {
+      id: 'b-rollstuhl',
+      name: 'Rollstuhlplatz am Tisch',
+      desc: '1 Dreieckstisch mit Rollstuhl an der langen Seite',
+      build(S) {
+        const t = tri(S, 0, 0, 0, -1);
+        return [t, mk('wheelchair', 0, 120 / 2 - 22, 0, { w: 70, d: 120 })];
+      },
+    },
+    {
+      id: 'b-rueckzug',
+      name: 'Rückzugsplatz',
+      desc: 'Einzeltisch mit Trennwand als Sichtschutz',
+      build(S) {
+        const t = tri(S, 0, 0, 0, -1);
+        return [t, seatAtEdge(S, t, 0), mk('partition', 0, (-2 * S.tableHeight) / 3 - 26, 0, { w: 120, d: 40 })];
+      },
+    },
+  ];
+
+  /* ---------- Räume ----------
+     Neuer Plan: LLR oder ein anderer Raum (Tafel immer an der oberen Wand). */
+  LLR.ROOMS = [
+    {
+      id: 'llr',
+      name: 'Lehr-Lern-Raum Inklusion (LLR)',
+      desc: '6,30 × 8,00 m mit der Einrichtung laut Room-Tour',
+      room: { w: 630, l: 800 },
+      build: (room) => LLR.roomFurniture(room),
+    },
+    {
+      id: 'klasse',
+      name: 'Klassenzimmer',
+      desc: '7,20 × 9,00 m · Tafel vorn, Fenster links, Tür rechts vorn',
+      room: { w: 720, l: 900 },
+      build(room) {
+        const W = room.w;
+        const L = room.l;
+        const out = [mk('iat', W / 2, 0, 180, { locked: true }), mk('desk', 115, 60, 180, { w: 140, d: 70 }), mk('officeChair', 115, 125, 0), mk('door', W, 110, -90, { w: 100 })];
+        for (let i = 0; i < 3; i++) {
+          const y = 150 + i * ((L - 300) / 2);
+          out.push(mk('window', 0, y, 90, { w: 180 }), mk('radiator', 6, y, 90, { w: 160, d: 12, locked: true }));
+        }
+        out.push(mk('cabinet', W / 2 - 100, L - 22.5, 0, { w: 100, d: 45 }), mk('cabinet', W / 2, L - 22.5, 0, { w: 100, d: 45 }), mk('bookshelf', W - 60, L - 17.5, 0, { w: 110, d: 35 }), mk('coatRack', W - 35, L - 120, -90));
+        return out;
+      },
+    },
+    {
+      id: 'seminar',
+      name: 'Seminarraum (breit)',
+      desc: '9,00 × 6,00 m · Tafel an der langen Seite',
+      room: { w: 900, l: 600 },
+      build(room) {
+        const W = room.w;
+        const L = room.l;
+        const out = [mk('iat', W / 2, 0, 180, { locked: true }), mk('projection', W / 2 + 230, 0, 180, { w: 200 }), mk('desk', 110, 60, 180, { w: 140, d: 70 }), mk('door', W, L - 110, -90, { w: 100 })];
+        for (let i = 0; i < 4; i++) out.push(mk('window', 120 + i * ((W - 240) / 3), L, 0, { w: 160 }));
+        out.push(mk('cabinet', W - 22.5, 120, -90, { w: 100, d: 45 }));
+        return out;
+      },
+    },
+    {
+      id: 'gruppe',
+      name: 'Gruppenraum (klein)',
+      desc: '4,50 × 5,50 m · Bildschirm vorn',
+      room: { w: 450, l: 550 },
+      build(room) {
+        const W = room.w;
+        const L = room.l;
+        return [mk('screen', W / 2, 0, 180, { w: 120 }), mk('door', W, L - 90, -90, { w: 90 }), mk('window', 0, L / 2, 90, { w: 180 }), mk('radiator', 6, L / 2, 90, { w: 160, d: 12, locked: true }), mk('bookshelf', W - 17.5, 140, -90, { w: 110, d: 35 })];
+      },
+    },
+  ];
+
   LLR.presetHelpers = { attach, curvedChain, tri, strip, square2, bigTri4, bigTri2, hexagon6, place, group, seats, seatAtEdge, ring, hull, mk };
 
   /* Farben verteilen (jeder vierte Stuhl grün) */
