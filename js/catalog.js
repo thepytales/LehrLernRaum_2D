@@ -248,7 +248,7 @@
     name: 'Rollstuhl (Prüfobjekt)',
     label: 'Rollstuhl',
     short: 'Rollstuhl',
-    cat: 'sitze',
+    cat: 'pruefen',
     layer: 4,
     obstacle: false,
     collide: true,
@@ -320,7 +320,7 @@
     name: 'Lehrkraft (Position)',
     label: 'Lehrkraft',
     short: 'Lehrkraft',
-    cat: 'sitze',
+    cat: 'pruefen',
     layer: 4,
     obstacle: false,
     kind: 'marker',
@@ -936,6 +936,93 @@
     },
   };
 
+
+  /* ---------- Raumform: Wandstücke und Säulen ----------
+     Mauerwerk im Raum (schraffiert wie die Außenwände). Damit lassen sich
+     Vorsprünge, Nischen oder L-förmige Räume nachbilden. Verdeckt die Sicht. */
+  T.wallBlock = {
+    name: 'Wandstück (Vorsprung, Nische)',
+    label: 'Wand\u00ADstück',
+    short: 'Wandstück',
+    cat: 'raum',
+    layer: 0,
+    obstacle: true,
+    tall: true,
+    shadow: false,
+    kind: 'furniture',
+    resizable: true,
+    defaultSize: { w: 100, d: 60 },
+    minSize: { w: 10, d: 10 },
+    desc: 'Mauerwerk im Raum: Wandvorsprung, Pfeiler oder ausgefüllte Ecke – so entstehen auch L-förmige Räume und Nischen. Verdeckt die Sicht.',
+    parts: (o) => [G.rect(o.w || 100, o.d || 60)],
+    draw(o) {
+      const w = o.w || 100;
+      const d = o.d || 60;
+      return rectEl(-w / 2, -d / 2, w, d, `fill="url(#hatch-wall)" stroke="#3F444A" stroke-width="1.2"`);
+    },
+  };
+
+  T.pillar = {
+    name: 'Säule (rund)',
+    label: 'Säule',
+    short: 'Säule',
+    cat: 'raum',
+    layer: 0,
+    obstacle: true,
+    tall: true,
+    shadow: false,
+    kind: 'furniture',
+    resizable: true,
+    round: true,
+    defaultSize: { w: 40, d: 40 },
+    minSize: { w: 10, d: 10 },
+    desc: 'Runde Säule oder Stütze im Raum. Verdeckt die Sicht.',
+    parts: (o) => [G.circlePoly((o.w || 40) / 2, 20)],
+    draw(o) {
+      const r = (o.w || 40) / 2;
+      return circ(0, 0, r, `fill="url(#hatch-wall)" stroke="#3F444A" stroke-width="1.2"`);
+    },
+  };
+
+  /* ---------- Maßlinie ----------
+     Bleibende Bemaßung (Länge = Breite des Objekts). Die Beschriftung steht
+     immer lesbar, daher hängt die Zeichnung von der Drehung ab (rotKey). */
+  T.dim = {
+    name: 'Maßlinie',
+    label: 'Maß\u00ADlinie',
+    short: 'Maßlinie',
+    cat: 'zonen',
+    pro: true,
+    layer: 7,
+    obstacle: false,
+    shadow: false,
+    kind: 'dim',
+    resizable: true,
+    widthOnly: true,
+    rotKey: true,
+    defaultSize: { w: 200, d: 24 },
+    minSize: { w: 10, d: 24 },
+    desc: 'Bleibende Bemaßung im Plan, z. B. für einen Abstand, der frei bleiben soll. Länge an den Griffen ziehen oder rechts eintippen. Gemessene Strecken (Messen) lassen sich ebenfalls behalten.',
+    parts: (o) => [G.rect(o.w || 200, 24)],
+    draw(o) {
+      const w = o.w || 200;
+      const hc = LLR.prefs && LLR.prefs.contrast() === 'high';
+      const c = hc ? '#000000' : '#5F3DC4';
+      const r = G.normAngle(o.rot || 0);
+      const flip = r > 90 || r <= -90;
+      const txt = `${Math.round(w)} cm`;
+      let s = rectEl(-w / 2, -12, w, 24, `fill="transparent"`);
+      s += line(-w / 2, 0, w / 2, 0, `stroke="${c}" stroke-width="${hc ? 2.2 : 1.6}"`);
+      for (const x of [-w / 2, w / 2]) {
+        s += line(x, -8, x, 8, `stroke="${c}" stroke-width="${hc ? 2.2 : 1.6}"`);
+        s += line(x - 4, 4, x + 4, -4, `stroke="${c}" stroke-width="${hc ? 2.4 : 1.8}"`);
+      }
+      const fs = Math.max(9, Math.min(14, w / (txt.length * 0.62)));
+      s += `<text x="0" y="${flip ? 6 : -6}" ${flip ? 'transform="rotate(180)"' : ''} font-size="${f(fs)}" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="700" fill="${c}" paint-order="stroke" stroke="#ffffff" stroke-width="3" stroke-linejoin="round" ${flip ? '' : ''}>${txt}</text>`;
+      return s;
+    },
+  };
+
   /* ---------- Freie Objekte ---------- */
   T.rect = {
     name: 'Freies Objekt (eckig)',
@@ -987,7 +1074,7 @@
     name: 'Textnotiz',
     label: 'Text\u00ADnotiz',
     short: 'Text',
-    cat: 'frei',
+    cat: 'zonen',
     layer: 6,
     obstacle: false,
     kind: 'label',
@@ -1082,6 +1169,68 @@
     tag: (o) => zoneTag(o, o.w || 220, o.d || 180, true),
   };
 
+  /* ---------- Eigene Möbel ----------
+     Beschreibung (spec): Name, Form (eckig/rund), Breite, Tiefe, Farbe,
+     Hindernis (steht im Weg) und hoch (verdeckt die Sicht). Die Typen heißen
+     „c_…“ und stehen im Plan unter doc.types (js/app.js), damit ein Plan auch
+     ohne die eigene Bibliothek geöffnet werden kann. */
+  const clampN = (v, a, b, d) => {
+    const n = Math.round(Number(v));
+    return isFinite(n) ? Math.max(a, Math.min(b, n)) : d;
+  };
+  LLR.registerCustomType = function (key, raw) {
+    if (typeof key !== 'string' || !/^c_[\w-]{1,40}$/.test(key) || !raw || typeof raw !== 'object') return null;
+    const spec = {
+      name: String(raw.name || '').trim().slice(0, 40) || 'Eigenes Möbel',
+      shape: raw.shape === 'round' ? 'round' : 'rect',
+      w: clampN(raw.w, 5, 2000, 100),
+      d: clampN(raw.d, 5, 2000, 60),
+      color: FREE_COLORS[raw.color] ? raw.color : 'grau',
+      obstacle: raw.obstacle !== false,
+      tall: !!raw.tall,
+    };
+    if (spec.shape === 'round') spec.d = spec.w;
+    const round = spec.shape === 'round';
+    T[key] = {
+      name: spec.name,
+      label: spec.name,
+      short: spec.name,
+      cat: 'eigene',
+      layer: 1,
+      obstacle: spec.obstacle,
+      tall: spec.tall,
+      shadow: true,
+      kind: 'furniture',
+      resizable: true,
+      round,
+      defaultSize: { w: spec.w, d: spec.d },
+      minSize: { w: 5, d: 5 },
+      colors: FREE_COLORS,
+      defaultColor: spec.color,
+      custom: true,
+      spec,
+      desc: `Eigenes Möbelstück (${spec.w} × ${spec.d} cm${spec.obstacle ? '' : ', kein Hindernis'}${spec.tall ? ', verdeckt die Sicht' : ''}).`,
+      parts: (o) => [round ? G.circlePoly((o.w || spec.w) / 2, 20) : G.rect(o.w || spec.w, o.d || spec.d)],
+      draw(o) {
+        const c = (FREE_COLORS[o.color] || FREE_COLORS[spec.color]).fill;
+        const w = o.w || spec.w;
+        const d = round ? w : o.d || spec.d;
+        let g = round
+          ? circ(0, 0, w / 2, `fill="${c}" stroke="${COLORS.ink}" stroke-width="1"`) + circ(0, 0, w / 2, SHEEN)
+          : rectEl(-w / 2, -d / 2, w, d, `rx="3" fill="${c}" stroke="${COLORS.ink}" stroke-width="1"`) + rectEl(-w / 2, -d / 2, w, d, `rx="3" ${SHEEN}`);
+        if (spec.tall) g += round ? circ(0, 0, w / 2 - 4, `fill="none" stroke="${COLORS.ink}" stroke-width="0.8" stroke-dasharray="3 2"`) : rectEl(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8, `rx="2" fill="none" stroke="${COLORS.ink}" stroke-width="0.8" stroke-dasharray="3 2"`);
+        if (!o.label) {
+          const txt = spec.name.length > 18 ? spec.name.slice(0, 17) + '…' : spec.name;
+          const fs = Math.min(14, d * 0.32, (w * 0.9) / Math.max(3, txt.length * 0.58));
+          if (fs >= 6) g += `<text x="0" y="0" font-size="${f(fs)}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-weight="600" fill="#1F2933">${LLR.esc(txt)}</text>`;
+        }
+        return g;
+      },
+    };
+    return spec;
+  };
+  LLR.FREE_COLORS = FREE_COLORS;
+
   /* Schattenwurf: nur für Möbel, die über dem Boden stehen */
   for (const k in T) {
     const d = T[k];
@@ -1093,14 +1242,17 @@
   LLR.esc = (s) =>
     String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  /* Gruppen im Möbelkatalog; pro = nur in der Profi-Ansicht */
   LLR.CATEGORIES = [
     { id: 'tische', name: 'Tische' },
-    { id: 'sitze', name: 'Sitzplätze & Personen' },
+    { id: 'sitze', name: 'Sitzplätze' },
+    { id: 'pruefen', name: 'Zum Prüfen' },
     { id: 'lounge', name: 'Lounge' },
     { id: 'stauraum', name: 'Möbel & Stauraum' },
-    { id: 'raum', name: 'Raum & Technik' },
-    { id: 'zonen', name: 'Zonen' },
-    { id: 'frei', name: 'Freie Objekte' },
+    { id: 'zonen', name: 'Zonen & Notizen' },
+    { id: 'raum', name: 'Raum & Technik', pro: true },
+    { id: 'frei', name: 'Freie Objekte', pro: true },
+    { id: 'eigene', name: 'Eigene Möbel', pro: true },
   ];
 
   LLR.TYPES = T;

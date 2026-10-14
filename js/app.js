@@ -13,7 +13,16 @@
   const HATCH = '<pattern id="hatch-wall" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#5B6168"/><line x1="0" y1="0" x2="0" y2="8" stroke="#6E747B" stroke-width="3"/></pattern>';
   /* Boden: heller Linoleum mit feiner Sprenkelung (wie im LLR) */
   const FLOOR = '<pattern id="floor-tex" width="60" height="60" patternUnits="userSpaceOnUse"><circle cx="7" cy="11" r="0.9" fill="#D9D2C3" fill-opacity="0.6"/><circle cx="31" cy="4" r="0.7" fill="#CFC7B6" fill-opacity="0.5"/><circle cx="48" cy="22" r="1" fill="#D9D2C3" fill-opacity="0.55"/><circle cx="19" cy="37" r="0.8" fill="#CFC7B6" fill-opacity="0.5"/><circle cx="54" cy="49" r="0.7" fill="#D9D2C3" fill-opacity="0.6"/><circle cx="36" cy="53" r="1.1" fill="#E2DCCF" fill-opacity="0.7"/><circle cx="4" cy="52" r="0.6" fill="#CFC7B6" fill-opacity="0.5"/><path d="M12 24 q6 -3 12 0" fill="none" stroke="#E4DED2" stroke-width="0.8" stroke-opacity="0.8"/><path d="M40 36 q5 2 10 -1" fill="none" stroke="#E4DED2" stroke-width="0.8" stroke-opacity="0.8"/></pattern>';
-  const SIGHT_COLORS = { good: '#2F9E44', side: '#F59F00', person: '#F59F00', back: '#E03131', none: '#E03131', hidden: '#E03131' };
+  /* Statusfarben je nach Darstellung (js/boot.js): Standard oder bei Farbsehschwäche */
+  const pal = () => (LLR.prefs ? LLR.prefs.pal() : { good: '#2F9E44', warn: '#F59F00', bad: '#E03131' });
+  const SIGHT_COLORS = {};
+  const syncSightColors = () => {
+    const p = pal();
+    Object.assign(SIGHT_COLORS, { good: p.good, side: p.warn, person: p.warn, back: p.bad, none: p.bad, hidden: p.bad });
+  };
+  syncSightColors();
+  /* Größe von Marken und Etiketten (Schriftgröße, Kontrast) */
+  const ms = () => (LLR.prefs ? LLR.prefs.markScale() : 1);
   const ROUTE_NOW = '#1F6FEB';
   const ROUTE_MOVE = '#E67700';
   const ROUTE_CHAIR = '#2F9E44';
@@ -30,6 +39,7 @@
     return g;
   };
   LLR.SIGHT_COLORS = SIGHT_COLORS;
+  LLR.syncSightColors = syncSightColors;
 
   const app = {
     doc: null,
@@ -88,10 +98,12 @@
   app.worldBounds = (o) => G.toWorld(app.localBounds(o), o);
 
   /* ---------- Dokument ---------- */
+  /* Eigene Vorlagen (js/custom.js) behalten ihre Stuhlfarben */
   app.buildPreset = function (preset, doc) {
-    const objs = preset.build(doc.settings, doc.room);
-    return LLR.colorChairs(objs.map((o) => Object.assign({}, o, { id: LLR.newId() })));
+    const objs = preset.build(doc.settings, doc.room).map((o) => Object.assign({}, o, { id: LLR.newId() }));
+    return preset.custom ? objs : LLR.colorChairs(objs);
   };
+  const findPreset = (id) => (LLR.findPreset ? LLR.findPreset(id) : LLR.PRESETS.find((p) => p.id === id));
 
   app.createDoc = function (presetId) {
     const room = Object.assign({}, LLR.DEFAULT_ROOM);
@@ -114,6 +126,19 @@
     const settings = Object.assign({}, LLR.DEFAULT_SETTINGS, raw.settings || {});
     settings.grid = clamp(Math.round(Number(settings.grid)) || LLR.DEFAULT_SETTINGS.grid, 5, 500);
     settings.gridSnap = !!settings.gridSnap;
+    // Prüfregeln (js/analysis.js → A.RULES): nur bekannte Werte im erlaubten Bereich
+    if (settings.rules) settings.rules = A.cleanRules(settings.rules);
+    if (!settings.rules || !Object.keys(settings.rules).length) delete settings.rules;
+    if (typeof settings.profile !== 'string') delete settings.profile;
+    // Eigene Möbeltypen reisen mit dem Plan (Teilen-Link, Datei)
+    let types = null;
+    if (raw.types && typeof raw.types === 'object') {
+      types = {};
+      for (const [k, spec] of Object.entries(raw.types)) {
+        const clean = LLR.registerCustomType(k, spec);
+        if (clean) types[k] = clean;
+      }
+    }
     // Lernende (Sitzplan)
     let learners;
     if (Array.isArray(raw.learners) && raw.learners.length) {
@@ -154,6 +179,7 @@
       return out;
     };
     const doc = { v: 1, name: String(raw.name || 'Raumplan').slice(0, 120), room, settings, objects: cleanObjs(raw.objects) };
+    if (types && Object.keys(types).length) doc.types = types;
     if (learners) doc.learners = learners;
     // Unterrichtsphasen: die Objekte der aktiven Phase stehen in doc.objects
     if (Array.isArray(raw.phases) && raw.phases.length > 1) {
@@ -184,12 +210,85 @@
     app.emit('select');
   };
 
-  app.pushHistory = function (before) {
-    if (before === undefined || before === app.serialize()) return;
-    app.undoStack.push(before);
+  app.pushHistory = function (before, label) {
+    if (app._batch) return;
+    const now = app.serialize();
+    if (before === undefined || before === now) return;
+    app.undoStack.push({ s: before, label: label || app.describeChange(before, now), t: Date.now() });
     if (app.undoStack.length > 200) app.undoStack.shift();
     app.redoStack = [];
     app.emit('history');
+  };
+
+  /* Mehrere Änderungen als ein Schritt im Verlauf (z. B. Assistent) */
+  app.batch = function (fn, label) {
+    const before = app.serialize();
+    app._batch = (app._batch || 0) + 1;
+    try {
+      fn();
+    } finally {
+      app._batch--;
+    }
+    if (!app._batch) app.pushHistory(before, label);
+  };
+
+  /* Kurze Beschreibung einer Änderung für den Verlauf */
+  app.describeChange = function (a, b) {
+    let x;
+    let y;
+    try {
+      x = JSON.parse(a);
+      y = JSON.parse(b);
+    } catch (e) {
+      return 'Änderung';
+    }
+    const name = (o) => (T[o.type] ? T[o.type].short : 'Objekt');
+    const many = (n, one, more) => (n === 1 ? one : `${n} ${more}`);
+    if ((x.phases || []).length !== (y.phases || []).length) return (y.phases || []).length > (x.phases || []).length ? 'Phase hinzugefügt' : 'Phase gelöscht';
+    if ((x.phase || 0) !== (y.phase || 0)) return 'Phase gewechselt';
+    if (JSON.stringify(x.room) !== JSON.stringify(y.room)) return 'Raumgröße geändert';
+    const lx = x.learners || [];
+    const ly = y.learners || [];
+    if (lx.length !== ly.length) return ly.length > lx.length ? many(ly.length - lx.length, 'Person hinzugefügt', 'Personen hinzugefügt') : many(lx.length - ly.length, 'Person entfernt', 'Personen entfernt');
+    const mx = new Map(x.objects.map((o) => [o.id, o]));
+    const my = new Map(y.objects.map((o) => [o.id, o]));
+    const added = y.objects.filter((o) => !mx.has(o.id));
+    const removed = x.objects.filter((o) => !my.has(o.id));
+    let moved = 0;
+    let turned = 0;
+    let sized = 0;
+    let seated = 0;
+    let other = 0;
+    let lastChanged = null;
+    for (const o of y.objects) {
+      const p = mx.get(o.id);
+      if (!p) continue;
+      const pos = Math.abs(p.x - o.x) > 0.4 || Math.abs(p.y - o.y) > 0.4;
+      const rot = Math.abs(G.normAngle((p.rot || 0) - (o.rot || 0))) > 0.4;
+      const size = p.w !== o.w || p.d !== o.d;
+      const seat = (p.learner || '') !== (o.learner || '');
+      const rest = JSON.stringify(Object.assign({}, p, { x: 0, y: 0, rot: 0, w: 0, d: 0, learner: 0 })) !== JSON.stringify(Object.assign({}, o, { x: 0, y: 0, rot: 0, w: 0, d: 0, learner: 0 }));
+      if (rot) turned++;
+      else if (pos) moved++;
+      if (size) sized++;
+      if (seat) seated++;
+      if (rest) other++;
+      if (pos || rot || size || rest) lastChanged = o;
+    }
+    if (added.length && removed.length) return `Anordnung geändert (${added.length} neu, ${removed.length} entfernt)`;
+    const same = (list) => list.every((o) => o.type === list[0].type);
+    if (added.length) return added.length === 1 ? `${name(added[0])} hinzugefügt` : same(added) ? `${added.length} × ${name(added[0])} hinzugefügt` : `${added.length} Objekte hinzugefügt`;
+    if (removed.length) return removed.length === 1 ? `${name(removed[0])} gelöscht` : same(removed) ? `${removed.length} × ${name(removed[0])} gelöscht` : `${removed.length} Objekte gelöscht`;
+    if (sized) return sized === 1 && lastChanged ? `${name(lastChanged)}: Größe geändert` : `${sized} Objekte: Größe geändert`;
+    if (turned) return turned === 1 && lastChanged ? `${name(lastChanged)} gedreht` : `${turned} Objekte gedreht`;
+    if (moved) return moved === 1 && lastChanged ? `${name(lastChanged)} verschoben` : `${moved} Objekte verschoben`;
+    if (seated) return 'Sitzplan geändert';
+    if (other) return other === 1 && lastChanged ? `${name(lastChanged)} geändert` : `${other} Objekte geändert`;
+    if (JSON.stringify(lx) !== JSON.stringify(ly)) return 'Lernende geändert';
+    if (x.name !== y.name) return 'Plan umbenannt';
+    if (JSON.stringify(x.settings) !== JSON.stringify(y.settings)) return 'Einstellungen geändert';
+    if (JSON.stringify(x.phases) !== JSON.stringify(y.phases)) return 'Phase geändert';
+    return 'Änderung';
   };
 
   /* Änderung mit Undo-Eintrag durchführen */
@@ -199,7 +298,7 @@
     fn(app.doc);
     const roomAfter = JSON.stringify(app.doc.room) + JSON.stringify(app.doc.settings);
     if (roomBefore !== roomAfter) app.renderRoom();
-    app.pushHistory(before);
+    app.pushHistory(before, opts && opts.label);
     app.changed(opts);
   };
 
@@ -210,24 +309,30 @@
 
   app.undo = function () {
     if (!app.undoStack.length) return;
-    app.redoStack.push(app.serialize());
-    app.doc = keepPrefs(JSON.parse(app.undoStack.pop()));
+    const e = app.undoStack.pop();
+    app.redoStack.push({ s: app.serialize(), label: e.label, t: e.t });
+    app.doc = keepPrefs(JSON.parse(e.s));
     app.sel = new Set([...app.sel].filter((id) => byId(id)));
     app.renderRoom();
     app.changed({ skipHistory: true });
     app.emit('select');
     app.emit('history');
+    app.emit('announce', 'Rückgängig: ' + e.label);
+    return e;
   };
 
   app.redo = function () {
     if (!app.redoStack.length) return;
-    app.undoStack.push(app.serialize());
-    app.doc = keepPrefs(JSON.parse(app.redoStack.pop()));
+    const e = app.redoStack.pop();
+    app.undoStack.push({ s: app.serialize(), label: e.label, t: e.t });
+    app.doc = keepPrefs(JSON.parse(e.s));
     app.sel = new Set([...app.sel].filter((id) => byId(id)));
     app.renderRoom();
     app.changed({ skipHistory: true });
     app.emit('select');
     app.emit('history');
+    app.emit('announce', 'Wiederholt: ' + e.label);
+    return e;
   };
 
   /* Bedien-Einstellung umschalten (Einrasten, Stühle mitnehmen, Raster) */
@@ -262,6 +367,7 @@
   /* Nach jeder Änderung: neu zeichnen, analysieren, speichern */
   app.changed = function (opts) {
     opts = opts || {};
+    if (!opts.live) ensureTypes();
     app.renderObjects();
     app.problems = A.problems(app.doc);
     app.scheduleAnalysis(opts.fast ? 140 : 0);
@@ -274,6 +380,19 @@
       app.emit('live');
     }
   };
+
+  /* Eigene Möbeltypen, die im Plan vorkommen, stehen in doc.types – so
+     lassen sich Plan, Datei und Teilen-Link auch ohne die Bibliothek öffnen */
+  function ensureTypes() {
+    const used = new Set();
+    for (const o of app.allObjects()) if (T[o.type] && T[o.type].custom) used.add(o.type);
+    const cur = app.doc.types || {};
+    if (!used.size && !app.doc.types) return;
+    const next = {};
+    for (const k of used) next[k] = T[k].spec || cur[k];
+    if (Object.keys(next).length) app.doc.types = next;
+    else delete app.doc.types;
+  }
 
   /* ---------- SVG-Grundgerüst ---------- */
   const el = (name, attrs, parent) => {
@@ -305,16 +424,18 @@
     const L = app.doc.room.l;
     const g = S().grid || 50;
     const M = GRID_MAJOR[g] || g * 4;
+    const hcGrid = LLR.prefs && LLR.prefs.contrast() === 'high';
     app.els.defs.innerHTML =
-      `<pattern id="grid-s" width="${g}" height="${g}" patternUnits="userSpaceOnUse"><path d="M${g} 0H0V${g}" fill="none" stroke="#D9D4C8" stroke-width="${g < 25 ? 0.45 : 0.6}"/></pattern>` +
-      `<pattern id="grid-l" width="${M}" height="${M}" patternUnits="userSpaceOnUse"><rect width="${M}" height="${M}" fill="url(#grid-s)"/><path d="M${M} 0H0V${M}" fill="none" stroke="#C9C2B3" stroke-width="1"/></pattern>` +
+      `<pattern id="grid-s" width="${g}" height="${g}" patternUnits="userSpaceOnUse"><path d="M${g} 0H0V${g}" fill="none" stroke="${hcGrid ? '#B5B5B5' : '#D9D4C8'}" stroke-width="${g < 25 ? 0.45 : 0.6}"/></pattern>` +
+      `<pattern id="grid-l" width="${M}" height="${M}" patternUnits="userSpaceOnUse"><rect width="${M}" height="${M}" fill="url(#grid-s)"/><path d="M${M} 0H0V${M}" fill="none" stroke="${hcGrid ? '#8A8A8A' : '#C9C2B3'}" stroke-width="1"/></pattern>` +
       FLOOR +
       HATCH +
       LLR.FURN_DEFS;
     const fl = app.els.floor;
+    const hc = LLR.prefs && LLR.prefs.contrast() === 'high';
     fl.innerHTML =
-      `<rect x="0" y="0" width="${W}" height="${L}" fill="#F7F4EE"/><rect x="0" y="0" width="${W}" height="${L}" fill="url(#floor-tex)"/>` +
-      (app.overlay.grid ? `<rect x="0" y="0" width="${W}" height="${L}" fill="url(#grid-l)"/>` : '');
+      (hc ? `<rect x="0" y="0" width="${W}" height="${L}" fill="#FFFFFF"/>` : `<rect x="0" y="0" width="${W}" height="${L}" fill="#F7F4EE"/><rect x="0" y="0" width="${W}" height="${L}" fill="url(#floor-tex)"/>`) +
+      (app.overlay.grid ? `<rect x="0" y="0" width="${W}" height="${L}" fill="url(#grid-l)"${hc ? ' opacity="0.9"' : ''}/>` : '');
     let w = `<path fill-rule="evenodd" fill="url(#hatch-wall)" stroke="#3F444A" stroke-width="1" d="M${-WALL} ${-WALL}H${W + WALL}V${L + WALL}H${-WALL}Z M0 0V${L}H${W}V0Z"/>`;
     // Wände ziehen = Raumgröße ändern (unsichtbare Griffflächen)
     const band = (x, y, bw, bh, hx, hy) => {
@@ -351,6 +472,10 @@
       o.type, o.w, o.d, o.color, o.foot, o.mirror, o.outward, o.text, o.size, o.label, o.learner ? app.learnerName(o.learner) : '',
       o.type === 'table' ? s.tableBase + 'x' + s.tableHeight : '',
       o.type === 'chair' ? s.chairW + 'x' + s.chairD : '',
+      def(o).rotKey ? Math.round(o.rot || 0) : '',
+      def(o).custom ? JSON.stringify(def(o).spec) : '',
+      app.labelScale || 1,
+      LLR.prefs ? LLR.prefs.contrast() : '',
     ].join('|');
   };
 
@@ -370,7 +495,8 @@
 
   function buildNode(n, o) {
     const d = def(o);
-    let html = (d.shadow ? shadowMarkup(o) : '') + '<g class="shape">' + d.draw(o, S()) + '</g>';
+    const hc = LLR.prefs && LLR.prefs.contrast() === 'high';
+    let html = (d.shadow && !hc ? shadowMarkup(o) : '') + '<g class="shape">' + d.draw(o, S()) + '</g>';
     if (d.hitPad) {
       const b = G.bbox(app.localBounds(o));
       html += `<rect x="${f(b.minX - 4)}" y="${f(b.minY - 4)}" width="${f(b.w + 8)}" height="${f(b.h + 8)}" fill="transparent"/>`;
@@ -378,9 +504,11 @@
     // Beschriftung bzw. Name der Person auf dem Platz (Sitzplan)
     const person = o.learner ? app.learnerName(o.learner) : '';
     const text = person || o.label;
-    if (text && d.kind !== 'label' && d.kind !== 'zone') {
-      const fs = d.kind === 'seat' || d.kind === 'wheelchair' ? 10.5 : 13;
-      const t = text.length > 14 ? text.slice(0, 13) + '…' : text;
+    if (text && d.kind !== 'label' && d.kind !== 'zone' && d.kind !== 'dim') {
+      const ls = app.labelScale || 1;
+      const fs = (d.kind === 'seat' || d.kind === 'wheelchair' ? 10.5 : 13) * ls;
+      const max = ls > 1 ? 10 : 14;
+      const t = text.length > max ? text.slice(0, max - 1) + '…' : text;
       const fill = person ? '#0B3B8C' : '#111';
       html += `<g class="lbl"><text x="0" y="0" font-size="${fs}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-weight="700" fill="${fill}" paint-order="stroke" stroke="#fff" stroke-width="3.2" stroke-linejoin="round">${LLR.esc(t)}</text></g>`;
     }
@@ -417,7 +545,7 @@
       seen.add(o.id);
       let n = app.nodes.get(o.id);
       if (!n) {
-        n = { g: el('g', { 'data-id': o.id, class: 'obj' }), key: null };
+        n = { g: el('g', { 'data-id': o.id, class: 'obj', role: 'img' }), key: null };
         app.nodes.set(o.id, n);
       }
       const key = shapeKey(o);
@@ -595,7 +723,7 @@
         for (const s of t.spots) {
           const p = s.anchor;
           const sc = s.now ? 1 : 0.72;
-          h += `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${sc})" opacity="${s.now ? 1 : 0.85}">`;
+          h += `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${f(sc * ms())})" opacity="${s.now ? 1 : 0.85}">`;
           h += `<circle r="9.5" fill="${s.now ? '#1F6FEB' : '#ffffff'}" stroke="#1F6FEB" stroke-width="${s.now ? 1.6 : 1.4}" ${s.now ? '' : 'stroke-dasharray="3 2"'}/>`;
           h += `<path d="M-1.5 -5.2 a1.6 1.6 0 1 1 0.01 0 M-1.8 -2.6 v4 h4.5 l2 4 M-1.8 -0.5 h3.5 M-3.2 -0.8 a4.2 4.2 0 1 0 5.6 5" fill="none" stroke="${s.now ? '#fff' : '#1F6FEB'}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>`;
           h += `</g>`;
@@ -610,7 +738,7 @@
         return o && A.isSeat(o);
       });
       if (coneIds.length <= 8) for (const id of coneIds) h += coneMarkup(A.sightCone(app.doc, id), k);
-      for (const s of sight.seats) h += `<g transform="translate(${f(s.x)} ${f(s.y)})">${LLR.sightGlyph(s.cat)}</g>`;
+      for (const s of sight.seats) h += `<g transform="translate(${f(s.x)} ${f(s.y)}) scale(${f(ms())})">${LLR.sightGlyph(s.cat)}</g>`;
     }
     // weitere Prüfansichten (Lehrkraft, Ruhe, Sitzplan, Umbau): js/lenses.js
     const lens = app.lens();
@@ -662,7 +790,7 @@
       const wpx = label.length * 6.3 + 16;
       const bg = strong ? lc : '#ffffff';
       const fg = strong ? '#ffffff' : lc;
-      h += `<g transform="translate(${pt(m)}) scale(${f(k)})"><rect x="${f(-wpx / 2)}" y="-10" width="${f(wpx)}" height="20" rx="10" fill="${bg}" stroke="${lc}" stroke-width="1.2"/><text y="0.5" font-size="11.5" font-weight="700" fill="${fg}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(label)}</text></g>`;
+      h += `<g transform="translate(${pt(m)}) scale(${f(k * ms())})"><rect x="${f(-wpx / 2)}" y="-10" width="${f(wpx)}" height="20" rx="10" fill="${bg}" stroke="${lc}" stroke-width="1.2"/><text y="0.5" font-size="11.5" font-weight="700" fill="${fg}" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(label)}</text></g>`;
     }
     return h;
   }
@@ -719,7 +847,7 @@
   /* Kleines Etikett (z. B. Maße beim Ziehen) */
   function chip(p, k, text, color) {
     const wpx = text.length * 7 + 18;
-    return `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${f(k)})" pointer-events="none"><rect x="${f(-wpx / 2)}" y="-12" width="${f(wpx)}" height="24" rx="12" fill="${color || '#1971C2'}"/><text y="0.5" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(text)}</text></g>`;
+    return `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${f(k * ms())})" pointer-events="none"><rect x="${f(-wpx / 2)}" y="-12" width="${f(wpx)}" height="24" rx="12" fill="${color || '#1971C2'}"/><text y="0.5" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${LLR.esc(text)}</text></g>`;
   }
 
   /* ---------- Overlay: Auswahl, Griffe, Abstände ---------- */
@@ -732,13 +860,16 @@
     if (!app.doc) return;
     const k = app.px();
     let h = '';
-    const sw = f(1.5 * k);
+    const P = pal();
+    const hc = LLR.prefs && LLR.prefs.contrast() === 'high';
+    const SEL = hc ? '#000000' : '#1971C2';
+    const sw = f((hc ? 2.4 : 1.5) * k);
     // Probleme (Überschneidungen / außerhalb)
     for (const [id, why] of app.problems) {
       const o = byId(id);
       if (!o) continue;
       for (const poly of app.worldParts(o)) {
-        h += `<path d="${G.polyPath(poly)}" fill="#E03131" fill-opacity="0.18" stroke="#E03131" stroke-width="${f(2 * k)}" pointer-events="none"/>`;
+        h += `<path d="${G.polyPath(poly)}" fill="${P.bad}" fill-opacity="0.18" stroke="${P.bad}" stroke-width="${f(2 * k)}" pointer-events="none"/>`;
       }
       void why;
     }
@@ -764,7 +895,7 @@
           if (hit) break;
         }
       }
-      const c = hit ? '#E03131' : '#2F9E44';
+      const c = hit ? P.bad : P.good;
       h += `<circle cx="${f(o.x)}" cy="${f(o.y)}" r="${r}" fill="${c}" fill-opacity="0.08" stroke="${c}" stroke-width="${f(1.6 * k)}" stroke-dasharray="${f(8 * k)} ${f(5 * k)}" pointer-events="none"/>`;
       h += `<text x="${f(o.x)}" y="${f(o.y - r - 6 * k)}" font-size="${f(12 * k)}" text-anchor="middle" fill="${c}" font-family="system-ui, sans-serif" font-weight="700" paint-order="stroke" stroke="#fff" stroke-width="${f(3 * k)}" pointer-events="none">Wendekreis Ø ${S().turning} cm ${hit ? '– zu eng' : '– passt'}</text>`;
     }
@@ -772,7 +903,8 @@
     const selObjs = [...app.sel].map(byId).filter(Boolean);
     for (const o of selObjs) {
       const b = app.worldBounds(o);
-      h += `<path d="${G.polyPath(b)}" fill="none" stroke="#1971C2" stroke-width="${sw}" stroke-dasharray="${f(5 * k)} ${f(3 * k)}" pointer-events="none"/>`;
+      if (hc) h += `<path d="${G.polyPath(b)}" fill="none" stroke="#FFD400" stroke-width="${f(5 * k)}" pointer-events="none"/>`;
+      h += `<path d="${G.polyPath(b)}" fill="none" stroke="${SEL}" stroke-width="${sw}" stroke-dasharray="${f(5 * k)} ${f(3 * k)}" pointer-events="none"/>`;
       if (o.locked) {
         const c = b[1];
         h += `<g transform="translate(${f(c.x)} ${f(c.y)}) scale(${f(k)})" pointer-events="none"><circle r="9" fill="#495057"/><path d="M-3.5 -0.5h7v5h-7z M-2 -0.5v-2.2a2 2 0 0 1 4 0v2.2" fill="none" stroke="#fff" stroke-width="1.4"/></g>`;
@@ -791,7 +923,7 @@
         hp = G.add(top, G.mul(dir, 30 * k));
       } else {
         const bb = G.bbox([].concat(...movable.map((o) => app.worldBounds(o))));
-        h += `<rect x="${f(bb.minX)}" y="${f(bb.minY)}" width="${f(bb.w)}" height="${f(bb.h)}" fill="none" stroke="#1971C2" stroke-width="${f(1 * k)}" pointer-events="none"/>`;
+        h += `<rect x="${f(bb.minX)}" y="${f(bb.minY)}" width="${f(bb.w)}" height="${f(bb.h)}" fill="none" stroke="${SEL}" stroke-width="${f(1 * k)}" pointer-events="none"/>`;
         anchor = { x: (bb.minX + bb.maxX) / 2, y: bb.minY };
         hp = { x: anchor.x, y: bb.minY - 30 * k };
       }
@@ -813,16 +945,22 @@
     // Abstände des ausgewählten Objekts (nicht bei Prüfansichten mit eigenen Marken am Objekt)
     const lens = app.lens();
     if (selObjs.length === 1 && app.overlay.dims && (!lens || lens === 'access')) {
-      const lines = A.clearances(app.doc, selObjs[0].id);
+      let lines = A.clearances(app.doc, selObjs[0].id);
       const need = S().passage;
+      const walk = S().walk || 50;
+      const pro = !LLR.prefs || LLR.prefs.isPro();
+      // Einfach: nur Lücken, durch die man nicht (gut) hindurchkommt – direkt
+      // anstehende Möbel (unter 20 cm) und ausreichend breite Wege nicht
+      if (!pro) lines = lines.filter((ln) => ln.d >= 20 && ln.d < need);
       for (const ln of lines) {
         const ok = ln.d >= need;
-        const c = ok ? '#2B8A3E' : ln.d >= 70 ? '#E67700' : '#C92A2A';
+        const c = ok ? (P.good === '#2F9E44' ? '#2B8A3E' : P.good) : ln.d >= 70 ? (P.warn === '#F59F00' ? '#E67700' : P.warn) : P.bad === '#E03131' ? '#C92A2A' : P.bad;
         const m = G.lerp(ln.p, ln.q, 0.5);
-        const txt = Math.round(ln.d) + ' cm';
+        const txt = Math.round(ln.d) + ' cm' + (pro ? '' : ln.d < walk ? ' – zu eng zum Gehen' : ' – zu eng für Rollstuhl');
+        const wpx = pro ? 50 : txt.length * 6.6 + 18;
         h += `<line x1="${f(ln.p.x)}" y1="${f(ln.p.y)}" x2="${f(ln.q.x)}" y2="${f(ln.q.y)}" stroke="${c}" stroke-width="${sw}" pointer-events="none"/>`;
         h += `<circle cx="${f(ln.p.x)}" cy="${f(ln.p.y)}" r="${f(2.5 * k)}" fill="${c}" pointer-events="none"/><circle cx="${f(ln.q.x)}" cy="${f(ln.q.y)}" r="${f(2.5 * k)}" fill="${c}" pointer-events="none"/>`;
-        h += `<g transform="translate(${f(m.x)} ${f(m.y)}) scale(${f(k)})" pointer-events="none"><rect x="-25" y="-10" width="50" height="20" rx="10" fill="${c}"/><text y="0.5" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${txt}</text></g>`;
+        h += `<g transform="translate(${f(m.x)} ${f(m.y)}) scale(${f(k * ms())})" pointer-events="none"><rect x="${f(-wpx / 2)}" y="-10" width="${f(wpx)}" height="20" rx="10" fill="${c}"/><text y="0.5" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${txt}</text></g>`;
       }
     }
     // Messwerkzeug
@@ -836,7 +974,7 @@
       if (d > 1) {
         const label = Math.round(d) + ' cm' + (ok ? ' ✓ Rollstuhl' : '');
         const wpx = label.length * 7 + 16;
-        h += `<g transform="translate(${f(m.x)} ${f(m.y)}) scale(${f(k)})" pointer-events="none"><rect x="${-wpx / 2}" y="-12" width="${wpx}" height="24" rx="12" fill="#7048E8"/><text y="0.5" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${label}</text></g>`;
+        h += `<g transform="translate(${f(m.x)} ${f(m.y)}) scale(${f(k * ms())})" pointer-events="none"><rect x="${-wpx / 2}" y="-12" width="${wpx}" height="24" rx="12" fill="#7048E8"/><text y="0.5" font-size="12.5" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif">${label}</text></g>`;
       }
     }
     // Auswahlrahmen
@@ -1155,7 +1293,7 @@
   };
 
   app.applyPreset = function (id) {
-    const preset = LLR.PRESETS.find((p) => p.id === id);
+    const preset = findPreset(id);
     if (!preset) return;
     app.mutate((doc) => {
       doc.objects = doc.objects.filter((o) => !(isTable(o) || o.type === 'chair' || o.type === 'stool' || (preset.shelves && o.type === 'shelfRound')));
@@ -1169,8 +1307,8 @@
         if (blocked) shelves.forEach((sh, i) => parks[i] && Object.assign(sh, { x: parks[i].x, y: parks[i].y, rot: parks[i].rot }));
       }
       doc.objects.push(...added);
-      if (!doc.name || doc.name === 'Neuer Raumplan' || LLR.PRESETS.some((x) => x.name === doc.name)) doc.name = preset.name;
-    });
+      if (!doc.name || doc.name === 'Neuer Raumplan' || LLR.PRESETS.some((x) => x.name === doc.name) || (LLR.custom && LLR.custom.templates().some((x) => x.name === doc.name))) doc.name = preset.name;
+    }, { label: `Anordnung „${preset.name}“ übernommen` });
     app.sel = new Set();
     app.emit('select');
   };
@@ -1283,7 +1421,7 @@
       }
       let objs = clone(doc.objects);
       let pname = name || 'Phase ' + (doc.phases.length + 1);
-      const preset = presetId && LLR.PRESETS.find((p) => p.id === presetId);
+      const preset = presetId && findPreset(presetId);
       if (preset) {
         objs = objs.filter((o) => !(isTable(o) || o.type === 'chair' || o.type === 'stool' || (preset.shelves && o.type === 'shelfRound')));
         // vorhandene Tische/Stühle wiederverwenden (gleiche IDs), damit der Umbau sichtbar wird:
@@ -1386,7 +1524,7 @@
   /* Übergang zwischen zwei Anordnungen abspielen: erst Tische und große Möbel,
      dann die Stühle; weggeräumte Möbel blenden aus, neue ein. */
   app.playTransition = function (fromObjs, toObjs, done) {
-    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduce = LLR.prefs ? LLR.prefs.reduceMotion() : window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce || !fromObjs) {
       if (done) done();
       return;
@@ -1732,6 +1870,7 @@
 
   function startPinch() {
     const pts = [...app.pointers.values()];
+    if (app.drag) clearTimeout(app.drag.lp);
     if (app.drag && EDIT_DRAGS.has(app.drag.kind) && app.drag.moved) finishMove();
     app.drag = {
       kind: 'pinch',
@@ -1779,12 +1918,28 @@
       return;
     }
     if (app.pointers.size > 2) return;
+    downInner(e);
+    // Langes Drücken (Touch, Stift): Kontextmenü
+    const dr = app.drag;
+    if (dr && dr.touch && !app.placing && app.mode === 'select' && ['move', 'pan', 'none', 'marquee'].includes(dr.kind)) {
+      dr.lp = setTimeout(() => {
+        if (app.drag !== dr || dr.moved) return;
+        dr.lpFired = true;
+        dr.kind = 'none';
+        if (navigator.vibrate) navigator.vibrate(12);
+        app.emit('context', { x: dr.startClient.x, y: dr.startClient.y, id: dr.tapId || null, touch: true });
+      }, 520);
+    }
+  }
+
+  function downInner(e) {
     const p = app.toWorld(e.clientX, e.clientY);
     const base = { pointerId: e.pointerId, startClient: { x: e.clientX, y: e.clientY }, start: p, moved: false, touch: e.pointerType !== 'mouse' };
     app.drag = null;
 
     if ((e.pointerType === 'mouse' && (e.button === 1 || e.button === 2)) || spaceDown) {
-      app.drag = Object.assign(base, { kind: 'pan', view0: Object.assign({}, app.view), k0: app.px(), tapClears: false });
+      const ctxEl = e.button === 2 && !spaceDown ? e.target.closest('[data-id]') : null;
+      app.drag = Object.assign(base, { kind: 'pan', view0: Object.assign({}, app.view), k0: app.px(), tapClears: false, ctx: e.button === 2 && !spaceDown, ctxId: ctxEl ? ctxEl.getAttribute('data-id') : null });
       return;
     }
     // Sitzplan: Person ausgewählt, jetzt einen Platz antippen (Ziehen verschiebt die Ansicht)
@@ -1990,7 +2145,9 @@
     if (!dr.moved) {
       const th = dr.touch ? 7 : 3;
       if (Math.hypot(dxC, dyC) < th) return;
+      if (dr.lpFired) return;
       dr.moved = true;
+      clearTimeout(dr.lp);
     }
     const p = app.toWorld(e.clientX, e.clientY);
     if (dr.kind === 'pan' || dr.kind === 'place') {
@@ -2090,6 +2247,11 @@
     }
     const dr = app.drag;
     if (!dr || !had) return;
+    clearTimeout(dr.lp);
+    if (dr.lpFired) {
+      app.drag = null;
+      return;
+    }
     if (dr.kind === 'pinch') {
       if (app.pointers.size === 0) app.drag = null;
       return;
@@ -2108,6 +2270,8 @@
         if (o && (isTable(o) || o.type === 'partition')) app.selectGroup(o.id);
         else if (o) app.emit('edit', o.id);
       } else app._lastTap = { id: dr.tapId, t: now };
+    } else if (dr.kind === 'pan' && dr.ctx && !dr.moved) {
+      app.emit('context', { x: e.clientX, y: e.clientY, id: dr.ctxId });
     } else if ((dr.kind === 'pan' || dr.kind === 'room') && !dr.moved && dr.tapClears) {
       app.clearSelection();
       if (app.measure) {
@@ -2197,6 +2361,19 @@
     } else if ((k === 'l' || k === 'L') && !mod) {
       app.toggleLock();
     }
+  };
+
+  /* Gemessene Strecke als Maßlinie in den Plan übernehmen */
+  app.keepMeasure = function () {
+    const m = app.measure;
+    if (!m || G.dist(m.a, m.b) < 5) return null;
+    const c = G.lerp(m.a, m.b, 0.5);
+    const o = { id: LLR.newId(), type: 'dim', x: c.x, y: c.y, rot: G.normAngle(G.angle(G.sub(m.b, m.a))), w: Math.round(G.dist(m.a, m.b)), d: 24 };
+    app.mutate((doc) => doc.objects.push(o));
+    app.measure = null;
+    app.setMode('select');
+    app.select([o.id]);
+    return o;
   };
 
   app.setMode = function (mode) {

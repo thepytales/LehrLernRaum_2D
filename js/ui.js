@@ -20,6 +20,10 @@
   const ZONE_NAMES = ['Präsentation', 'Gruppenarbeit', 'Einzelarbeit', 'Ruhezone', 'Rückzug', 'Lounge', 'Lehrkraft', 'Material', 'Bewegung', 'Garderobe'];
   const GRID_SIZES = [10, 20, 25, 50, 100];
   const TABS = { catalog: 'Möbel', presets: 'Anordnungen', learners: 'Lernende & Sitzplan', phases: 'Unterrichtsphasen', objects: 'Im Raum' };
+  const isPro = () => !LLR.prefs || LLR.prefs.isPro();
+  /* Katalog: diese Gruppen sind zu Beginn aufgeklappt, alle anderen zu */
+  const CAT_OPEN = { bausteine: true, tische: true, sitze: true, pruefen: true, eigene: true };
+  const catOpen = (id) => (panels.cats[id] === undefined ? !!CAT_OPEN[id] : panels.cats[id] !== false);
 
   /* Zustand der Oberfläche (im Browser gemerkt) */
   const panels = (() => {
@@ -62,17 +66,17 @@
   const sglyph = (lv, sym) => `<svg class="sg" viewBox="-8.5 -8.5 17 17" aria-hidden="true">${LLR.statusGlyph(lv, sym)}</svg>`;
   const tglyph = (cat) => sglyph(...LLR.TEACHER_GLYPH[cat]);
   const cglyph = (cat) => sglyph(...LLR.CALM_GLYPH[cat]);
-  const dot = (lv) => `<span class="dot l${lv}" aria-hidden="true"></span>`;
+  const dot = (lv) => `<span class="dot l${lv}" aria-hidden="true">${lv === 0 ? '✓' : lv === 1 ? '!' : lv === 2 ? '✕' : ''}</span>`;
   const row = (cls, ic, txt, small) => `<div class="check-row ${cls}">${icon(ic)}<span class="txt">${txt}${small ? `<small>${small}</small>` : ''}</span></div>`;
 
   /* ---------- Toast ---------- */
   let toastTimer = null;
-  function toast(msg) {
+  function toast(msg, ms) {
     const t = $('#toast');
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 3400);
+    toastTimer = setTimeout(() => t.classList.remove('show'), ms || Math.max(3400, Math.min(9000, msg.length * 55)));
   }
   app.on('toast', toast);
 
@@ -119,27 +123,68 @@
       if (d.kind === 'zone' || d.kind === 'label') continue;
       inner += `<g transform="translate(${o.x.toFixed(1)} ${o.y.toFixed(1)}) rotate(${(o.rot || 0).toFixed(1)})">${d.draw(o, S)}</g>`;
     }
-    return `<svg class="pv" viewBox="${cx - side / 2} ${cy - side / 2} ${side} ${side}" aria-hidden="true">${inner}</svg>`;
+    return `<svg class="${opts.cls || 'pv'}" viewBox="${cx - side / 2} ${cy - side / 2} ${side} ${side}" aria-hidden="true">${inner}</svg>`;
   }
 
-  /* ---------- Katalog ---------- */
+  /* ---------- Katalog ----------
+     Oben fertige Bausteine (Tischgruppen mit Stühlen), darunter die Möbel
+     nach Gruppen. Raum & Technik, freie und eigene Objekte nur in der
+     Profi-Ansicht. */
+  const blockObjs = (b) => LLR.colorChairs(b.build(app.doc ? app.doc.settings : LLR.DEFAULT_SETTINGS));
+
+  function catSection(id, name, n, inner) {
+    const open = catOpen(id);
+    return `<section class="cat" data-catsec="${id}"><button class="cat-head" data-cat="${id}" aria-expanded="${open}">${icon('i-chevron')}${esc(name)}<span class="n">${n}</span></button><div class="cat-grid${id === 'bausteine' ? ' blocks' : ''}"${open ? '' : ' hidden'}>${inner}</div></section>`;
+  }
+
   function renderCatalog() {
     const box = $('#tab-catalog');
-    let h = `<label class="search">${icon('i-search')}<span class="visually-hidden">Möbel suchen</span><input type="search" id="cat-search" placeholder="Möbel suchen …" autocomplete="off"></label><div id="cat-list">`;
+    const pro = isPro();
+    const prevQ = $('#cat-search') ? $('#cat-search').value : '';
+    let h = `<label class="search">${icon('i-search')}<span class="visually-hidden">Möbel suchen</span><input type="search" id="cat-search" placeholder="Möbel suchen …" autocomplete="off"></label>
+      <p class="cat-note top">Antippen fügt in der Bildmitte ein, am Computer auch per Ziehen. <span class="badge-demo" aria-hidden="true">12/12</span> = im Plan / im LLR vorhanden.</p><div id="cat-list">`;
+    let blocks = '';
+    for (const b of LLR.BLOCKS) {
+      blocks += `<button class="cat-item block" data-block="${b.id}" data-search="${esc((b.name + ' ' + b.desc + ' baustein gruppe').toLowerCase())}" draggable="true" title="${esc(b.name + ' – ' + b.desc)}">${planPreview(blockObjs(b), { cls: 'thumb' })}<span class="name">${esc(b.name)}</span><small>${esc(b.desc)}</small></button>`;
+    }
+    h += catSection('bausteine', 'Fertige Bausteine', LLR.BLOCKS.length, blocks);
     for (const c of LLR.CATEGORIES) {
-      const types = Object.keys(T).filter((k) => T[k].cat === c.id);
-      if (!types.length) continue;
-      const open = panels.cats[c.id] !== false;
-      h += `<section class="cat" data-catsec="${c.id}"><button class="cat-head" data-cat="${c.id}" aria-expanded="${open}">${icon('i-chevron')}${esc(c.name)}<span class="n">${types.length}</span></button><div class="cat-grid"${open ? '' : ' hidden'}>`;
+      if (c.pro && !pro) continue;
+      const types = Object.keys(T).filter((k) => T[k].cat === c.id && (pro || !T[k].pro));
+      let inner = '';
       for (const k of types) {
         const d = T[k];
-        h += `<button class="cat-item" data-type="${k}" data-search="${esc((d.name + ' ' + (d.label || '') + ' ' + (d.desc || '')).replace(/\u00AD/g, '').toLowerCase())}" draggable="true" title="${esc(d.name + ' – ' + (d.desc || ''))}">${thumb(sample(k))}<span class="name">${esc(d.label || d.name)}</span><span class="badge" data-badge="${k}"></span></button>`;
+        inner += `<button class="cat-item" data-type="${k}" data-search="${esc((d.name + ' ' + (d.label || '') + ' ' + (d.desc || '')).replace(/\u00AD/g, '').toLowerCase())}" draggable="true" title="${esc(d.name + ' – ' + (d.desc || ''))}">${thumb(sample(k))}<span class="name">${esc(d.label || d.name)}</span><span class="badge" data-badge="${k}"></span></button>`;
       }
-      h += `</div></section>`;
+      if (c.id === 'eigene') inner += `<button class="cat-item add" data-act="newFurniture" data-search="neu eigenes möbel anlegen" title="Eigenes Möbelstück anlegen">${icon('i-plus')}<span class="name">Neues Möbel&shy;stück …</span></button>`;
+      if (!inner) continue;
+      h += catSection(c.id, c.name, types.length, inner);
     }
-    h += `</div><p class="empty-note" id="cat-empty" hidden>Nichts gefunden.</p><p class="cat-note">Antippen fügt das Objekt in der Bildmitte ein, am Computer auch per Ziehen. Zahlen: im Plan / im LLR vorhanden.</p>`;
+    h += `</div><p class="empty-note" id="cat-empty" hidden>Nichts gefunden.</p>`;
+    if (!pro) h += `<p class="cat-note">Weitere Objekte (Tür, Fenster, Wandstücke, freie und eigene Möbel) gibt es in der <button class="link-btn" data-act="toggleLevel">Profi-Ansicht</button>.</p>`;
     box.innerHTML = h;
     updateBadges();
+    if (prevQ) {
+      $('#cat-search').value = prevQ;
+      filterCatalog(prevQ);
+    }
+  }
+
+  /* Baustein einfügen (Mitte der Ansicht oder an einer Stelle im Plan) */
+  function addBlock(id, at) {
+    const b = LLR.BLOCKS.find((x) => x.id === id);
+    if (!b) return;
+    const before = app.stats().count;
+    const objs = app.addGroup(b.build(app.doc.settings), at, `Baustein „${b.name}“ eingefügt`);
+    const after = app.stats().count;
+    const over = [];
+    for (const k of new Set(objs.map((o) => o.type))) {
+      const d = T[k];
+      if (d.inv && after[k] > d.inv && (before[k] || 0) <= after[k]) over.push(`${after[k]} × ${d.short} (im LLR: ${d.inv})`);
+    }
+    toast(over.length ? `„${b.name}“ eingefügt – jetzt ${over.join(', ')}. Zusätzliche Möbel müssen aus anderen Räumen kommen.` : `„${b.name}“ eingefügt – mit der Maus oder dem Finger an die richtige Stelle ziehen.`);
+    if (LLR.assist) LLR.assist.tip('block', 'Tipp: Eine Tischgruppe lässt sich als Ganzes drehen (Drehen-Knopf unten) – Doppelklick auf einen Tisch wählt sie später wieder komplett aus.');
+    if (mobile()) closeDrawers();
   }
 
   function filterCatalog(q) {
@@ -148,13 +193,13 @@
     for (const sec of $$('#cat-list .cat')) {
       let n = 0;
       for (const it of $$('.cat-item', sec)) {
-        const hit = !q || it.getAttribute('data-search').includes(q);
+        const hit = !q || (it.getAttribute('data-search') || '').includes(q);
         it.hidden = !hit;
         if (hit) n++;
       }
       sec.hidden = !n;
       const grid = $('.cat-grid', sec);
-      const open = q ? true : panels.cats[sec.getAttribute('data-catsec')] !== false;
+      const open = q ? true : catOpen(sec.getAttribute('data-catsec'));
       grid.hidden = !open;
       $('.cat-head', sec).setAttribute('aria-expanded', String(open));
       if (n) any = true;
@@ -171,6 +216,7 @@
       b.className = 'badge';
       if (d.inv) {
         b.textContent = `${n}/${d.inv}`;
+        b.title = `${n} im Plan, ${d.inv} im LLR vorhanden`;
         b.hidden = false;
         if (n === d.inv) b.classList.add('full');
         if (n > d.inv) b.classList.add('over');
@@ -193,7 +239,11 @@
         head.nextElementSibling.hidden = !panels.cats[id];
         return;
       }
-      const it = e.target.closest('.cat-item');
+      const act = e.target.closest('[data-act]');
+      if (act) return doAct(act.getAttribute('data-act'));
+      const bl = e.target.closest('[data-block]');
+      if (bl) return addBlock(bl.getAttribute('data-block'));
+      const it = e.target.closest('.cat-item[data-type]');
       if (!it) return;
       const type = it.getAttribute('data-type');
       const d = T[type];
@@ -209,17 +259,24 @@
     box.addEventListener('dragstart', (e) => {
       const it = e.target.closest('.cat-item');
       if (!it) return;
-      e.dataTransfer.setData('text/llr-type', it.getAttribute('data-type'));
+      if (it.hasAttribute('data-block')) e.dataTransfer.setData('text/llr-block', it.getAttribute('data-block'));
+      else if (it.hasAttribute('data-type')) e.dataTransfer.setData('text/llr-type', it.getAttribute('data-type'));
+      else return e.preventDefault();
       e.dataTransfer.effectAllowed = 'copy';
     });
     const svg = $('#plan');
     svg.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('text/llr-type') || e.dataTransfer.types.includes('text/llr-learner')) {
+      if (e.dataTransfer.types.includes('text/llr-type') || e.dataTransfer.types.includes('text/llr-block') || e.dataTransfer.types.includes('text/llr-learner')) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
       }
     });
     svg.addEventListener('drop', (e) => {
+      const block = e.dataTransfer.getData('text/llr-block');
+      if (block) {
+        e.preventDefault();
+        return addBlock(block, app.toWorld(e.clientX, e.clientY));
+      }
       const type = e.dataTransfer.getData('text/llr-type');
       if (!type || !T[type]) return;
       e.preventDefault();
@@ -227,44 +284,84 @@
     });
   }
 
-  /* ---------- Anordnungen ---------- */
+  /* ---------- Anordnungen ----------
+     Filter nach Sozialform, eigene Vorlagen (js/custom.js) und die
+     Anordnungen der Handreichung. */
+  function presetCard(p, objs, extra) {
+    const n = LLR.presetSeats(p);
+    return `<div class="preset-wrap"><button class="preset" data-preset="${esc(p.id)}">${planPreview(objs)}<span><h3>${esc(p.name)}</h3><span class="persons">${esc(p.persons || n + ' Plätze')}</span>${p.persons ? `<span class="seats">${n} Plätze</span>` : ''}<p>${esc(p.note || '')}</p></span></button>${extra || ''}</div>`;
+  }
+
   function renderPresets() {
-    let h = `<p class="intro">Sitzordnungen aus der <em>Handreichung zur Anordnung der Tische</em>. Beim Übernehmen werden Tische, Stühle und Hocker neu gestellt – alles andere bleibt.</p>`;
+    const form = panels.form || 'alle';
+    let h = `<p class="intro">Sitzordnungen aus der <em>Handreichung zur Anordnung der Tische</em> und eigene Vorlagen. Beim Übernehmen werden Tische, Stühle und Hocker neu gestellt – alles andere bleibt.</p>`;
+    h += `<div class="chips" role="group" aria-label="Nach Sozialform filtern">${[{ id: 'alle', name: 'Alle' }].concat(LLR.FORMS).map((f) => `<button type="button" class="chip" data-form="${f.id}" aria-pressed="${form === f.id}">${esc(f.name)}</button>`).join('')}</div>`;
+    const own = LLR.custom ? LLR.custom.templates() : [];
+    h += `<div class="sub-title">Eigene Anordnungen</div>`;
+    if (own.length) for (const t of own) h += presetCard(t, t.build(), `<button class="icon-btn small preset-more" data-tpl="${esc(t.id)}" aria-label="${esc(t.name)}: umbenennen, exportieren, löschen" title="Umbenennen, exportieren, löschen">${icon('i-more')}</button>`);
+    else h += `<p class="empty-note">Noch keine eigenen Anordnungen. Stellen Sie Tische und Stühle auf und speichern Sie sie hier als Vorlage.</p>`;
+    h += `<div class="btn-row" style="margin:6px 0 10px"><button class="btn outline small" data-act="saveTemplate">${icon('i-save')}Aktuelle Anordnung speichern …</button>${isPro() ? `<button class="btn outline small" data-act="importTemplate">${icon('i-upload')}Aus Datei …</button>` : ''}</div>`;
+    h += `<div class="sub-title">Aus der Handreichung</div>`;
+    let shown = 0;
     for (const p of LLR.PRESETS) {
-      const objs = LLR.colorChairs(p.build(LLR.DEFAULT_SETTINGS, LLR.DEFAULT_ROOM));
-      h += `<button class="preset" data-preset="${p.id}">${planPreview(objs)}<span><h3>${esc(p.name)}</h3><span class="persons">${esc(p.persons)}</span><p>${esc(p.note)}</p></span></button>`;
+      if (form !== 'alle' && !(p.forms || []).includes(form)) continue;
+      shown++;
+      h += presetCard(p, LLR.colorChairs(p.build(LLR.DEFAULT_SETTINGS, LLR.DEFAULT_ROOM)));
     }
+    if (!shown) h += `<p class="empty-note">Keine Anordnung für diese Sozialform.</p>`;
     $('#tab-presets').innerHTML = h;
   }
 
+  async function choosePreset(p) {
+    const phases = !!app.doc.phases;
+    const v = await openDialog({
+      title: p.name,
+      body: `<p><strong>${esc(p.name)}</strong> · ${esc(p.persons || LLR.presetSeats(p) + ' Plätze')}${p.page ? ` · Handreichung S. ${p.page}` : ''}</p>${p.note ? `<p class="desc">${esc(p.note)}</p>` : ''}
+        <label class="toggle"><input type="radio" name="pmode" value="replace" checked><span>${phases ? 'In der aktuellen Phase übernehmen' : 'Übernehmen'}<small>Tische, Stühle und Hocker werden ersetzt${p.shelves ? ', die halbrunden Regale umgestellt' : ''}.</small></span></label>
+        <label class="toggle"><input type="radio" name="pmode" value="phase"><span>Als neue Unterrichtsphase anlegen<small>Die jetzige Anordnung bleibt als eigene Phase erhalten – mit Umbauplan und Übergang.</small></span></label>
+        <p class="desc">Rückgängig jederzeit mit <span class="kbd">Strg</span>+<span class="kbd">Z</span>.</p>`,
+      buttons: [
+        { label: 'Abbrechen', value: 'cancel' },
+        { label: 'Übernehmen', value: 'ok', cls: 'primary' },
+      ],
+      onOpen: (body) => (body._mode = () => (body.querySelector('input[name=pmode]:checked') || {}).value),
+    });
+    if (v !== 'ok') return;
+    const mode = $('#dlg-body')._mode();
+    if (mode === 'phase') {
+      const from = app.doc.objects;
+      app.addPhase(p.id);
+      if (panels.anim !== false) app.playTransition(from, app.doc.objects);
+      toast(`Neue Phase „${p.name}“ angelegt`);
+    } else {
+      app.applyPreset(p.id);
+      toast(`„${p.name}“ übernommen`);
+    }
+    if (mobile()) closeDrawers();
+  }
+
   function bindPresets() {
-    $('#tab-presets').addEventListener('click', async (e) => {
+    $('#tab-presets').addEventListener('click', (e) => {
+      const f = e.target.closest('[data-form]');
+      if (f) {
+        panels.form = f.getAttribute('data-form');
+        savePanels();
+        renderPresets();
+        const again = $(`#tab-presets [data-form="${panels.form}"]`);
+        if (again) again.focus();
+        return;
+      }
+      const m = e.target.closest('[data-tpl]');
+      if (m) {
+        if (LLR.custom) LLR.custom.templateMenu(m.getAttribute('data-tpl'), m);
+        return;
+      }
+      const a = e.target.closest('[data-act]');
+      if (a) return doAct(a.getAttribute('data-act'));
       const b = e.target.closest('[data-preset]');
       if (!b) return;
-      const p = LLR.PRESETS.find((x) => x.id === b.getAttribute('data-preset'));
-      const phases = !!app.doc.phases;
-      const v = await openDialog({
-        title: p.name,
-        body: `<p><strong>${esc(p.name)}</strong> · ${esc(p.persons)} · Handreichung S. ${p.page}</p><p class="desc">${esc(p.note)}</p>
-          <label class="toggle"><input type="radio" name="pmode" value="replace" checked><span>${phases ? 'In der aktuellen Phase übernehmen' : 'Übernehmen'}<small>Tische, Stühle und Hocker werden ersetzt${p.shelves ? ', die halbrunden Regale umgestellt' : ''}.</small></span></label>
-          <label class="toggle"><input type="radio" name="pmode" value="phase"><span>Als neue Unterrichtsphase anlegen<small>Die jetzige Anordnung bleibt als eigene Phase erhalten – mit Umbauplan und Übergang.</small></span></label>
-          <p class="desc">Rückgängig jederzeit mit <span class="kbd">Strg</span>+<span class="kbd">Z</span>.</p>`,
-        buttons: [
-          { label: 'Abbrechen', value: 'cancel' },
-          { label: 'Übernehmen', value: 'ok', cls: 'primary' },
-        ],
-        onOpen: (body) => (body._mode = () => (body.querySelector('input[name=pmode]:checked') || {}).value),
-      });
-      if (v !== 'ok') return;
-      const mode = $('#dlg-body')._mode();
-      if (mode === 'phase') {
-        app.addPhase(p.id);
-        toast(`Neue Phase „${p.name}“ angelegt`);
-      } else {
-        app.applyPreset(p.id);
-        toast(`„${p.name}“ übernommen`);
-      }
-      if (mobile()) closeDrawers();
+      const p = LLR.findPreset(b.getAttribute('data-preset'));
+      if (p) choosePreset(p);
     });
   }
 
@@ -346,6 +443,7 @@
     const st = app.stats();
     const c = st.count;
     const inv = (n, max) => `<span class="pill ${n > max ? 'warn' : n === max ? 'ok' : ''}">${n} / ${max}</span>`;
+    const maxSeats = A.rule(app.doc.settings, 'maxSeats');
     let h = `<h2 class="sec-title"><span>Raum<small>Nichts ausgewählt – ein Objekt antippen zeigt seine Details</small></span></h2>
       <div class="field-grid two">
         <label class="field">Breite – Tafelseite (m)<input type="number" data-room="w" value="${(r.w / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
@@ -354,7 +452,7 @@
       <p class="desc" style="margin-top:6px">Fläche <strong data-room-area>${app.fmtArea(r.w * r.l)}</strong> · auch im Plan an den Wänden ziehen</p>`;
     if (app.doc.phases) h += `<div class="sub-title">Phase</div><p class="desc">${app.phaseIndex() + 1} von ${app.doc.phases.length}: <strong>${esc(app.phases()[app.phaseIndex()].name)}</strong> · <button class="link-btn" data-act="openPhases">Phasen verwalten</button></p>`;
     h += `<div class="sub-title">Belegung</div><table class="stat-table">
-      <tr><td>Arbeitsplätze</td><td><span class="pill ${st.seats > 24 ? 'warn' : 'ok'}">${st.seats}</span></td></tr>
+      <tr><td>Arbeitsplätze</td><td><span class="pill ${st.seats > maxSeats ? 'warn' : 'ok'}">${st.seats}</span></td></tr>
       <tr><td>Dreieckstische</td><td>${inv(c.table || 0, 12)}</td></tr>
       ${c.tableRect ? `<tr><td>Rechtecktische</td><td>${c.tableRect}</td></tr>` : ''}
       <tr><td>Stühle</td><td>${inv(c.chair || 0, 19)}</td></tr>
@@ -367,7 +465,7 @@
       h += `<tr><td>Lernende mit Platz</td><td><span class="pill ${placed === learners.length ? 'ok' : 'info'}">${placed} / ${learners.length}</span></td></tr>`;
     }
     h += `</table>`;
-    if (st.seats > 24) h += row('warn', 'i-alert', 'Mehr als 24 Arbeitsplätze', 'Die Handreichung empfiehlt höchstens 24 Sitzplätze.');
+    if (st.seats > maxSeats) h += row('warn', 'i-alert', `Mehr als ${maxSeats} Arbeitsplätze`, maxSeats === 24 ? 'Die Handreichung empfiehlt höchstens 24 Sitzplätze.' : 'Laut den gewählten Prüfregeln sind es zu viele Plätze.');
     if ((c.chair || 0) > 19) h += row('warn', 'i-info', `${c.chair - 19} Stuhl/Stühle mehr als im LLR vorhanden`, 'Zusätzliche Stühle aus anderen Räumen holen.');
     const zones = app.doc.objects.filter((o) => T[o.type].kind === 'zone');
     if (zones.length) {
@@ -379,7 +477,7 @@
       h += `</table>`;
     }
     h += `<div class="btn-row"><button class="btn outline small" data-act="settings">${icon('i-sliders')}Raum &amp; Einstellungen</button></div>`;
-    h += `<p class="tip">${icon('i-info')}<span>Doppelklick auf einen Tisch wählt die ganze Gruppe samt Stühlen. Alles zur Bedienung unter <button class="link-btn" data-act="help">Hilfe</button>.</span></p>`;
+    h += `<p class="tip">${icon('i-info')}<span>Doppelklick auf einen Tisch wählt die ganze Gruppe samt Stühlen, Rechtsklick (oder lange drücken) zeigt weitere Aktionen. Alles zur Bedienung unter <button class="link-btn" data-act="help">Hilfe</button>.</span></p>`;
     return h;
   }
 
@@ -387,9 +485,25 @@
     const counts = {};
     for (const o of objs) counts[T[o.type].short] = (counts[T[o.type].short] || 0) + 1;
     const locked = objs.filter((o) => o.locked).length;
-    return `<h2 class="sec-title"><span>${objs.length} Objekte ausgewählt<small>${Object.entries(counts).map(([k, v]) => `${v} × ${esc(k)}`).join(', ')}${locked ? ` · ${locked} gesperrt` : ''}</small></span></h2>
-      <p class="desc">Drehen, Duplizieren, Sperren und Löschen über die Leiste unten im Plan.</p>
-      <div class="btn-row"><button class="btn outline small" data-act="rot90">${icon('i-rot-cw')}90° drehen</button><button class="btn outline small" data-act="none">Auswahl aufheben</button></div>`;
+    const tables = objs.some(A.isTable);
+    let h = `<h2 class="sec-title"><span>${objs.length} Objekte ausgewählt<small>${Object.entries(counts).map(([k, v]) => `${v} × ${esc(k)}`).join(', ')}${locked ? ` · ${locked} gesperrt` : ''}</small></span></h2>
+      <div class="btn-row"><button class="btn outline small" data-act="rot90">${icon('i-rot90')}90° drehen</button><button class="btn outline small" data-act="dup">${icon('i-copy')}Kopie</button>${tables ? `<button class="btn outline small" data-act="chairs">${icon('i-chair-add')}Stühle anstellen</button>` : ''}<button class="btn outline small" data-act="none">Auswahl aufheben</button></div>`;
+    if (!isPro()) return h + `<p class="desc" style="margin-top:8px">Ausrichten, Verteilen und genaue Maße gibt es in der <button class="link-btn" data-act="toggleLevel">Profi-Ansicht</button>.</p>`;
+    const bb = app.selBox();
+    const units = app.units().length;
+    if (bb) {
+      h += `<div class="sub-title">Lage der Auswahl</div><div class="field-grid">
+        <label class="field">Links (cm)<input type="number" data-msel="x" value="${Math.round(bb.minX)}" step="1"></label>
+        <label class="field">Oben (cm)<input type="number" data-msel="y" value="${Math.round(bb.minY)}" step="1"></label>
+        <label class="field">Drehen um (°)<input type="number" data-mrot value="" placeholder="z. B. 45" step="15"></label></div>
+        <p class="desc" style="margin-top:4px">Größe ${Math.round(bb.maxX - bb.minX)} × ${Math.round(bb.maxY - bb.minY)} cm · ${units} ${units === 1 ? 'Einheit' : 'Einheiten'} (Tischgruppen zählen samt Stühlen als eine)</p>`;
+    }
+    const tb = (act, ic, label) => `<button class="icon-btn" data-act="${act}" aria-label="${label}" title="${label}">${icon(ic)}</button>`;
+    h += `<div class="sub-title">${units === 1 ? 'Im Raum ausrichten' : 'Ausrichten'}</div><div class="tool-row">${tb('align:left', 'i-al-left', 'Links ausrichten')}${tb('align:hcenter', 'i-al-hc', 'Waagerecht mittig')}${tb('align:right', 'i-al-right', 'Rechts ausrichten')}<span class="sep"></span>${tb('align:top', 'i-al-top', 'Oben ausrichten')}${tb('align:vcenter', 'i-al-vc', 'Senkrecht mittig')}${tb('align:bottom', 'i-al-bottom', 'Unten ausrichten')}</div>`;
+    h += `<div class="sub-title">Verteilen &amp; Spiegeln</div><div class="tool-row">${tb('dist:x', 'i-dist-h', 'Waagerecht gleichmäßig verteilen (ab 3 Einheiten)')}${tb('dist:y', 'i-dist-v', 'Senkrecht gleichmäßig verteilen (ab 3 Einheiten)')}<span class="sep"></span>${tb('mirror:x', 'i-flip-h', 'Links ↔ rechts spiegeln')}${tb('mirror:y', 'i-flip-v', 'Oben ↔ unten spiegeln')}</div>
+      <div class="gap-row"><label class="field">Abstand zwischen den Einheiten (cm)<input type="number" id="m-gap" value="${panels.gap || 90}" min="0" max="1000" step="5"></label><button class="btn outline small" data-act="distgap:x" title="Nebeneinander mit diesem Abstand">${icon('i-dist-h')}nebeneinander</button><button class="btn outline small" data-act="distgap:y" title="Untereinander mit diesem Abstand">${icon('i-dist-v')}untereinander</button></div>`;
+    if (objs.some((o) => A.isTable(o) || A.isSeat(o))) h += `<div class="btn-row"><button class="btn outline small" data-act="saveTemplate">${icon('i-save')}Als Vorlage speichern …</button></div>`;
+    return h;
   }
 
   function objectProps(o) {
@@ -415,7 +529,7 @@
       h += `<div class="sub-title">Größe</div>`;
       if (d.round) h += `<div class="field-grid"><label class="field">Durchmesser (cm)<input type="number" data-k="diam" value="${Math.round(o.w)}" min="${ms.w}" max="1000" step="5" ${o.locked ? 'disabled' : ''}></label></div>`;
       else {
-        h += `<div class="field-grid two"><label class="field">Breite (cm)<input type="number" data-k="w" value="${Math.round(o.w)}" min="${ms.w}" max="2000" step="5" ${o.locked ? 'disabled' : ''}></label>`;
+        h += `<div class="field-grid two"><label class="field">${d.kind === 'dim' ? 'Länge' : 'Breite'} (cm)<input type="number" data-k="w" value="${Math.round(o.w)}" min="${ms.w}" max="2000" step="${d.kind === 'dim' ? 1 : 5}" ${o.locked ? 'disabled' : ''}></label>`;
         if (!d.widthOnly) h += `<label class="field">Tiefe (cm)<input type="number" data-k="d" value="${Math.round(o.d)}" min="${ms.d}" max="2000" step="5" ${o.locked ? 'disabled' : ''}></label>`;
         h += `</div>`;
       }
@@ -432,14 +546,15 @@
       h += `<div class="sub-title">Optionen</div>`;
       for (const op of d.options) h += `<label class="toggle"><input type="checkbox" data-opt="${op.key}" ${o[op.key] ? 'checked' : ''}> ${esc(op.label)}</label>`;
     }
-    if (A.isTable(o)) h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Ganze Tischgruppe mit Stühlen auswählen</button></div>`;
+    if (A.isTable(o)) h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Ganze Tischgruppe mit Stühlen auswählen</button></div><div class="btn-row" style="margin-top:6px"><button class="btn outline small" data-act="chairs">${icon('i-chair-add')}Stühle anstellen</button><button class="btn outline small" data-act="chairsDel">${icon('i-chair-del')}Stühle wegnehmen</button></div>`;
     if (o.type === 'partition') h += `<div class="btn-row"><button class="btn outline small block" data-act="group">${icon('i-multi')}Alle verbundenen Trennwände auswählen</button></div>`;
     // Prüfungen für dieses Objekt
     const checks = objectChecks(o);
     if (checks) h += `<div class="sub-title">Prüfen</div><div class="mini-checks">${checks}</div>`;
     const why = app.problems.get(o.id);
     if (why) h += row('bad', 'i-alert', `${why.has('out') ? 'Ragt aus dem Raum heraus. ' : ''}${why.has('overlap') ? 'Überschneidet sich mit einem anderen Objekt.' : ''}`);
-    // Position (selten gebraucht, daher eingeklappt)
+    // Position (selten gebraucht, daher eingeklappt; nur in der Profi-Ansicht)
+    if (!isPro()) return h;
     h += `<details class="more" data-pos ${panels.pos ? 'open' : ''}><summary>Position &amp; Drehung</summary><div class="field-grid">
       <label class="field">X (cm)<input type="number" data-k="x" value="${Math.round(o.x)}" step="1" ${o.locked ? 'disabled' : ''}></label>
       <label class="field">Y (cm)<input type="number" data-k="y" value="${Math.round(o.y)}" step="1" ${o.locked ? 'disabled' : ''}></label>
@@ -450,11 +565,16 @@
 
   /* Kurz-Prüfungen am ausgewählten Objekt; ein Klick zeigt die Prüfung im Plan */
   function mini(lens, gl, title, txt, small) {
+    return miniRow(lens, gl, title, txt, small);
+  }
+  function miniRow(lens, gl, title, txt, small) {
     return `<button class="mini-row${app.overlay[lens] ? ' on' : ''}" data-mini="${lens}" title="${app.overlay[lens] ? 'Im Plan aktiv' : 'Im Plan zeigen'}">${gl}<span class="txt"><b>${title}</b>${txt}${small ? `<small>${small}</small>` : ''}</span></button>`;
   }
 
   function objectChecks(o) {
     let h = '';
+    const pro = isPro();
+    const T_SIGHT = pro ? 'Sicht auf Tafel & Bildschirme' : 'Sieht man von hier die Tafel?';
     if (A.isTable(o) || o.type === 'wheelchair') h += accessMini(o);
     if (!A.isSeat(o)) return h;
     // Sicht
@@ -462,8 +582,8 @@
     if (cone && cone.views.length) {
       const sum = { good: 'Direkter Blick', side: 'Kopf seitlich drehen', person: 'Person im Blickfeld', back: 'Kein Blick: abgewandt', none: 'Kein Blick: verdeckt' }[cone.cat];
       const b = cone.best;
-      h += mini('sight', glyph(cone.cat), 'Sicht auf Tafel & Bildschirme', sum, b ? `beste Sicht: ${esc(b.s.name)}, ${m1(b.dist)}${cone.free ? '' : `, ${Math.round(b.ang)}°`}` : '');
-    } else h += mini('sight', glyph('none'), 'Sicht auf Tafel & Bildschirme', 'Keine Präsentationsfläche vor diesem Platz');
+      h += mini('sight', glyph(cone.cat), T_SIGHT, sum, b ? `beste Sicht: ${esc(b.s.name)}, ${m1(b.dist)}${cone.free || !pro ? '' : `, ${Math.round(b.ang)}°`}` : '');
+    } else h += mini('sight', glyph('none'), T_SIGHT, 'Keine Präsentationsfläche vor diesem Platz');
     // Lehrkraft
     const t = app.getTeacher();
     const ts = t.seats.find((x) => x.id === o.id);
@@ -471,7 +591,7 @@
       const eye = { face: 'sieht das Gesicht', profile: 'sieht das Profil', back: 'sieht nur den Rücken', blocked: 'Sicht verdeckt' }[ts.eye.kind];
       let walk = 'nicht erreichbar';
       if (ts.reach) walk = `Weg ${m1(ts.walk)}${ts.reach.squeeze ? ' durch eine Engstelle' : ''}${ts.reach.across ? ', nur über den Tisch' : ''}`;
-      h += mini('teacher', tglyph(ts.cat), 'Lehrkraft', `${walk}`, `Lehrkraft ${eye}`);
+      h += mini('teacher', tglyph(ts.cat), pro ? 'Lehrkraft' : 'Kommt die Lehrkraft hierher?', `${walk}`, `Lehrkraft ${eye}`);
     }
     // Ruhe
     const c = app.getCalm();
@@ -480,7 +600,7 @@
       const label = { calm: 'Ruhiger Platz', mid: 'Mittlere Unruhe', busy: 'Unruhiger Platz' }[cs.cat];
       const top = cs.factors.filter((x) => x.pts > 0).slice(0, 3).map((x) => x.label + (x.detail ? ` (${x.detail})` : '')).join(' · ');
       const quiet = cs.factors.find((x) => x.key === 'quiet');
-      h += mini('calm', cglyph(cs.cat), 'Ruhe & Reize', `${label} · ${cs.score} von 100`, (top || 'keine Störquellen in der Nähe') + (quiet ? ' · in einer Ruhezone' : ''));
+      h += mini('calm', cglyph(cs.cat), pro ? 'Ruhe & Reize' : 'Ist es hier ruhig?', pro ? `${label} · ${cs.score} von 100` : label, (top || 'keine Störquellen in der Nähe') + (quiet ? ' · in einer Ruhezone' : ''));
     }
     // Bedarfe der Person auf dem Platz
     if (o.learner && LLR.classUI) h += LLR.classUI.seatChecks(o);
@@ -489,6 +609,7 @@
 
   function accessMini(o) {
     const a = app.access;
+    const mini = (lens, gl, title, txt, small) => miniRow(lens, gl, isPro() ? title : o.type === 'wheelchair' ? 'Kommt der Rollstuhl von der Tür hierher?' : 'Kommt ein Rollstuhl an diesen Tisch?', txt, small);
     if (!a) return mini('access', sglyph(1, 'bang'), 'Rollstuhl', 'Antippen, um den Weg von der Tür zu prüfen');
     if (!a.hasDoor) return mini('access', sglyph(2, 'x'), 'Rollstuhl', 'Keine Tür im Plan', 'Die Tür ist der Startpunkt der Wegprüfung.');
     if (o.type === 'wheelchair') {
@@ -519,7 +640,14 @@
       set('[data-room-area]', app.fmtArea(r.w * r.l));
       return;
     }
-    if (objs.length !== 1) return;
+    if (objs.length > 1) {
+      const bb = app.selBox();
+      if (bb) {
+        set('[data-msel="x"]', Math.round(bb.minX));
+        set('[data-msel="y"]', Math.round(bb.minY));
+      }
+      return;
+    }
     const o = objs[0];
     set('[data-k="x"]', Math.round(o.x));
     set('[data-k="y"]', Math.round(o.y));
@@ -550,6 +678,21 @@
         return;
       }
       const objs = app.selectedObjects();
+      if (t.hasAttribute('data-msel') || t.hasAttribute('data-mrot') || t.id === 'm-gap') {
+        const v = parseFloat(String(t.value).replace(',', '.'));
+        if (t.id === 'm-gap') {
+          if (isFinite(v)) panels.gap = Math.max(0, Math.min(1000, v));
+          savePanels();
+          return;
+        }
+        if (!isFinite(v)) return;
+        if (t.hasAttribute('data-mrot')) app.rotateSelected(v);
+        else if (t.getAttribute('data-msel') === 'x') app.moveSelTo(v, null);
+        else app.moveSelTo(null, v);
+        t.blur();
+        renderProps();
+        return;
+      }
       if (objs.length !== 1) return;
       const o = objs[0];
       const d = T[o.type];
@@ -617,27 +760,61 @@
     });
   }
 
-  /* Aktionsknöpfe (Panel, Schnellleiste, Menüs) */
-  function doAct(act) {
-    if (act === 'rotl') app.rotateSelected(-(app.doc.settings.angleSnap || 15));
-    else if (act === 'rotr') app.rotateSelected(app.doc.settings.angleSnap || 15);
+  /* Aktionsknöpfe (Panel, Schnellleiste, Menüs, Kontextmenü, Befehlssuche) */
+  function doAct(act, src) {
+    const S = app.doc.settings;
+    if (act === 'rotl') app.rotateSelected(-(S.angleSnap || 15));
+    else if (act === 'rotr') app.rotateSelected(S.angleSnap || 15);
     else if (act === 'rot90') app.rotateSelected(90);
+    else if (act === 'rot90l') app.rotateSelected(-90);
+    else if (act === 'rot180') app.rotateSelected(180);
     else if (act === 'dup') app.duplicateSelected();
+    else if (act === 'copy') {
+      app.copy();
+      toast('Kopiert – mit Strg+V oder „Einfügen“ wieder einsetzen.');
+    } else if (act === 'paste') app.paste();
     else if (act === 'del') app.deleteSelected();
     else if (act === 'lock') app.toggleLock();
     else if (act === 'none') app.clearSelection();
+    else if (act === 'selectAll') app.select(app.doc.objects.filter((o) => !o.locked).map((o) => o.id));
     else if (act === 'group') {
       const o = app.selectedObjects()[0];
       if (o) app.selectGroup(o.id);
-    } else if (act === 'carry') {
-      const on = !app.doc.settings.carryChairs;
+    } else if (act === 'chairs') {
+      const n = app.attachChairs();
+      const c = app.stats().count.chair || 0;
+      toast(n ? `${n} ${n === 1 ? 'Stuhl' : 'Stühle'} angestellt${c > 19 ? ` – jetzt ${c} Stühle im Plan (im LLR: 19)` : ''}.` : 'Keine freie Tischkante – dort stehen schon Stühle oder es ist zu eng.');
+    } else if (act === 'chairsDel') {
+      const n = app.removeChairs();
+      toast(n ? `${n} ${n === 1 ? 'Stuhl' : 'Stühle'} weggenommen.` : 'An diesen Tischen stehen keine Stühle.');
+    } else if (act.startsWith('align:')) {
+      if (!app.alignSel(act.slice(6))) toast('Erst Objekte auswählen.');
+    } else if (act.startsWith('dist:')) {
+      if (!app.distributeSel(act.slice(5))) toast('Zum gleichmäßigen Verteilen mindestens drei Tischgruppen oder Objekte auswählen.');
+    } else if (act.startsWith('distgap:')) {
+      const i = $('#m-gap');
+      const g = i ? parseFloat(String(i.value).replace(',', '.')) : panels.gap || 90;
+      if (isFinite(g)) panels.gap = g;
+      savePanels();
+      if (!app.distributeSel(act.slice(8), isFinite(g) ? g : 90)) toast('Mindestens zwei Tischgruppen oder Objekte auswählen.');
+    } else if (act.startsWith('mirror:')) app.mirrorSel(act.slice(7));
+    else if (act === 'carry') {
+      const on = !S.carryChairs;
       app.setPref('carryChairs', on);
       toast(on ? 'Angestellte Stühle wandern jetzt mit dem Tisch mit.' : 'Stühle bleiben stehen, wenn ein Tisch bewegt wird.');
     } else if (act === 'settings') openSettings();
+    else if (act === 'a11y') openSettings('darstellung');
+    else if (act === 'rules') openSettings('regeln');
     else if (act === 'details') showDetails();
     else if (act === 'wheelchair') addWheelchair();
     else if (act === 'addTeacher') addTeacher();
-    else if (act === 'selWheel') {
+    else if (act === 'addDoor') {
+      app.addObject('door', { x: app.doc.room.w, y: 120 });
+      toast('Tür an der rechten Wand eingefügt – an der Wand entlang verschieben.');
+    } else if (act === 'addQuiet') {
+      app.addObject('zone', null, { label: 'Ruhezone', color: 'gruen' });
+      toast('Ruhezone eingefügt – über die ruhigen Plätze ziehen und die Größe anpassen.');
+    } else if (act === 'selWheel') {
       app.select(app.doc.objects.filter((o) => o.type === 'wheelchair').map((o) => o.id));
       if (mobile()) closeDrawers();
     } else if (act === 'delWheel') {
@@ -645,10 +822,13 @@
       app.sel = new Set([...app.sel].filter((id) => app.byId(id)));
       app.emit('select');
       toast('Test-Rollstühle entfernt');
-    } else if (act === 'help') openHelp();
+    } else if (act.startsWith('mark:')) markSeats(act.slice(5));
+    else if (act.startsWith('lens:')) setLens(act.slice(5) === 'none' ? null : act.slice(5));
+    else if (act === 'help') openHelp();
     else if (act === 'showProblems') app.select([...app.problems.keys()]);
     else if (act === 'new') openNew();
     else if (act === 'plans') openPlans();
+    else if (act === 'savePlan') quickSave();
     else if (act === 'export') exportPNG();
     else if (act === 'print') printPlan('plan');
     else if (act === 'printRebuild') printPlan('rebuild');
@@ -656,7 +836,72 @@
     else if (act === 'share') openShare();
     else if (act === 'openPhases') openLibTab('phases');
     else if (act === 'openLearners') openLibTab('learners');
+    else if (act.startsWith('tab:')) openLibTab(act.slice(4));
+    else if (act === 'toggleLevel') setLevel(isPro() ? 'einfach' : 'profi');
+    else if (act === 'levelSimple') setLevel('einfach');
+    else if (act === 'levelPro') setLevel('profi');
+    else if (act === 'keepMeasure') {
+      if (app.keepMeasure()) toast('Maßlinie in den Plan übernommen – sie wird mitgedruckt.');
+    } else if (act === 'measure') app.setMode(app.mode === 'measure' ? 'select' : 'measure');
+    else if (act === 'multi') {
+      app.multi = !app.multi;
+      if (app.multi) app.setMode('select');
+      syncTools();
+    } else if (act === 'fit') app.fitView();
+    else if (act === 'zoomIn') app.zoomBy(1 / 1.3);
+    else if (act === 'zoomOut') app.zoomBy(1.3);
+    else if (act === 'undo') app.undo();
+    else if (act === 'redo') app.redo();
+    else if (act === 'grid' || act === 'dims' || act === 'roomDims') app.setOverlay(act, !app.overlay[act]);
+    else if (act === 'snap' || act === 'gridSnap') {
+      app.setPref(act, !S[act]);
+      toast(act === 'snap' ? (S.snap ? 'Magnetisches Einrasten an' : 'Magnetisches Einrasten aus') : S.gridSnap ? 'Am Raster einrasten an' : 'Am Raster einrasten aus');
+    } else if (act.startsWith('block:')) addBlock(act.slice(6));
+    else if (act.startsWith('add:')) {
+      app.addObject(act.slice(4));
+      if (mobile()) closeDrawers();
+    } else if (act.startsWith('preset:')) {
+      const p = LLR.findPreset(act.slice(7));
+      if (p) choosePreset(p);
+    } else if (act === 'nextPhase' || act === 'prevPhase') {
+      if (app.doc.phases) app.setPhase(app.phaseIndex() + (act === 'nextPhase' ? 1 : -1), { animate: panels.anim !== false });
+    } else if (act === 'nextObj' || act === 'prevObj') {
+      const o = app.selectNext(act === 'nextObj' ? 1 : -1);
+      if (o) ensureVisible(o);
+    } else if (LLR.assist && LLR.assist.act(act, src)) return;
+    else if (LLR.custom && LLR.custom.act(act, src)) return;
+    else if (LLR.commands && LLR.commands.act(act, src)) return;
     else if (LLR.classUI && LLR.classUI.act) LLR.classUI.act(act);
+  }
+
+  /* Plätze mit einem bestimmten Prüfergebnis auswählen („Was kann ich tun?“) */
+  function markSeats(kind) {
+    let ids = [];
+    let lens = null;
+    if (kind === 'noSight' || kind === 'turnSight') {
+      lens = 'sight';
+      ids = app.getSight().seats.filter((x) => (kind === 'noSight' ? x.cat === 'back' || x.cat === 'none' : x.cat === 'side' || x.cat === 'person')).map((x) => x.id);
+    } else if (kind === 'noReach' || kind === 'backTeacher') {
+      lens = 'teacher';
+      ids = app.getTeacher().seats.filter((x) => (kind === 'noReach' ? !x.reach || x.cat === 'none' : x.eye && x.eye.kind === 'back')).map((x) => x.id);
+    } else if (kind === 'busy') {
+      lens = 'calm';
+      ids = app.getCalm().seats.filter((x) => x.cat === 'busy').map((x) => x.id);
+    }
+    if (lens && !app.overlay[lens]) app.setLens(lens);
+    if (!ids.length) return toast('Keine solchen Plätze.');
+    app.select(ids);
+    toast(`${ids.length} ${ids.length === 1 ? 'Platz' : 'Plätze'} markiert – im Plan blau umrandet.`);
+  }
+
+  /* Strg+S: Plan unter seinem Namen im Browser speichern */
+  function quickSave() {
+    const name = app.doc.name || 'Raumplan';
+    const list = loadPlans();
+    const existing = list.find((p) => p.name === name);
+    const entry = { id: existing ? existing.id : LLR.newId(), name, date: Date.now(), doc: JSON.parse(app.serialize()) };
+    const next = existing ? list.map((p) => (p.id === existing.id ? entry : p)) : list.concat(entry);
+    if (storePlans(next)) toast(`„${name}“ ${existing ? 'aktualisiert' : 'gespeichert'} (Datei → Pläne)`);
   }
 
   function addWheelchair() {
@@ -692,11 +937,13 @@
   }
 
   /* ---------- Prüfen (rechts) ---------- */
+  const LEVEL_TXT = ['gut', 'mit Einschränkungen', 'Problem'];
   function lensCard(key, ic, title, summary, level, body) {
     const on = !!app.overlay[key];
+    const state = level >= 0 ? `Ergebnis: ${LEVEL_TXT[level]}` : '';
     return `<section class="lens-card${on ? ' on' : ''}" data-card="${key}">
       <button type="button" class="lens-head" data-lens-toggle="${key}" aria-expanded="${on}" title="${on ? 'Im Plan ausblenden' : 'Im Plan zeigen'}">
-        <span class="lens-ic">${icon(ic)}</span><span class="lens-title">${title}<small>${summary}</small></span>${on ? '<span class="lens-state">im Plan</span>' : dot(level)}
+        <span class="lens-ic">${icon(ic)}</span><span class="lens-title">${title}<small>${summary}</small></span>${on ? '<span class="lens-state">im Plan</span>' : dot(level)}${state ? `<span class="visually-hidden">${state}</span>` : ''}
       </button>
       ${on ? `<div class="lens-body">${body()}</div>` : ''}
     </section>`;
@@ -745,7 +992,9 @@
       ${s.persons ? `<tr class="sub"><td>${glyph('person')} Person im Blickfeld</td><td>${s.person}</td></tr>` : ''}
       <tr><td>${glyph('back')} Kein Blick (abgewandt / verdeckt)</td><td>${s.back}</td></tr></table>`;
     const H = A.HEIGHTS;
-    h += `<label class="toggle"><input type="checkbox" data-pref="sightPersons" ${s.persons ? 'checked' : ''}><span>Sitzende Personen im Blickfeld berücksichtigen<small>Ein Kopf (ca. ${2 * A.PERSON_R} cm breit) verdeckt je nach Abstand den unteren Teil der Fläche (Augenhöhe ${app.fmtM(H.eye)}, Fläche ${app.fmtM(H.low)}–${app.fmtM(H.top)}). Ab ${Math.round(A.PERSON_LIMIT * 100)} % gilt die Sicht als eingeschränkt.</small></span></label>`;
+    const R = A.currentRules(app.doc.settings);
+    h += `<label class="toggle"><input type="checkbox" data-pref="sightPersons" ${s.persons ? 'checked' : ''}><span>Sitzende Personen im Blickfeld berücksichtigen<small>Ein Kopf (ca. ${2 * A.PERSON_R} cm breit) verdeckt je nach Abstand den unteren Teil der Fläche (Augenhöhe ${app.fmtM(H.eye)}, Fläche ${app.fmtM(H.low)}–${app.fmtM(H.top)}). Ab ${R.personLimit} % gilt die Sicht als eingeschränkt.</small></span></label>`;
+    h += `<p class="desc">Direkter Blick bis ${R.sightDirect}° Kopfdrehung, mit gedrehtem Kopf bis ${R.sightSide}°.</p>`;
     h += `<p class="callout">Berücksichtigt: ${s.surfaces.map((x) => esc(x.name)).join(', ') || '–'}. Regale und Trennwände verdecken. <strong>Sitzplatz antippen</strong> zeigt den Sichtkegel. Die Handreichung empfiehlt, alle drei Flächen zu nutzen.</p>`;
     return h;
   }
@@ -776,8 +1025,92 @@
       <tr><td>${cglyph('busy')} Unruhige Plätze</td><td>${c.busy}</td></tr></table>`;
     if (c.glareSeats) h += row('warn', 'i-alert', `${c.glareSeats} Plätze sehen ein Fenster gespiegelt`, 'Auf Tafel oder Bildschirm kann sich das Fenster spiegeln – Lamellenvorhang schließen hilft.');
     if (!c.hasDoor) h += row('warn', 'i-info', 'Keine Tür im Plan', 'Ohne Tür fehlen Laufwege und Türnähe in der Bewertung.');
-    h += `<p class="callout">Bewertet werden: Nähe zur Tür (bis 30 Punkte) und zur Lounge (20), Laufwege anderer am Platz vorbei (25), viele Nachbarplätze (15), Blick aus dem Fenster (10) und Spiegelungen (10). Regale und Trennwände dämpfen Tür und Lounge; Plätze in einer Zone „Ruhezone“ oder „Rückzug“ gelten als ruhiger. <strong>Sitzplatz antippen</strong> zeigt die Gründe.</p>`;
+    const R = A.currentRules(app.doc.settings);
+    h += `<p class="callout">Bewertet werden: Nähe zur Tür (bis ${R.wDoor} Punkte) und zur Lounge (${R.wLounge}), Laufwege anderer am Platz vorbei (${R.wTraffic}), viele Nachbarplätze (${R.wCrowd}), Blick aus dem Fenster (${R.wWindow}) und Spiegelungen (${R.wGlare}). Ruhig unter ${R.calmMax}, unruhig ab ${R.busyMin} Punkten. Regale und Trennwände dämpfen Tür und Lounge; Plätze in einer Zone „Ruhezone“ oder „Rückzug“ gelten als ruhiger (−${R.wQuiet}). <strong>Sitzplatz antippen</strong> zeigt die Gründe.</p>`;
     return h;
+  }
+
+  /* Prüfungen als Fragen (Einfach-Ansicht) */
+  const QUESTIONS = {
+    access: 'Kommt ein Rollstuhl überall hin?',
+    sight: 'Sehen alle die Tafel?',
+    teacher: 'Komme ich als Lehrkraft an jeden Platz?',
+    calm: 'Wo ist es ruhig, wo unruhig?',
+    seating: 'Passt der Sitzplan zu den Bedarfen?',
+    rebuild: 'Wie aufwendig ist der Umbau?',
+  };
+  LLR.QUESTIONS = QUESTIONS;
+  const plural = (n, one, more) => `${n} ${n === 1 ? one : more}`;
+
+  /* Ergebnis jeder Prüfung: Stufe (0 gut, 1 eingeschränkt, 2 Problem, −1 nichts
+     zu prüfen), Zusammenfassung mit Zahlen (Profi) und Antwort (Einfach) */
+  function checkResults() {
+    const S = app.doc.settings;
+    const out = {};
+    const a = app.access;
+    let lv = -1;
+    let sum = `Durchgang ${S.passage} cm · Wenden Ø ${S.turning} cm`;
+    let ans = 'Wird geprüft …';
+    if (a && !a.hasDoor) (lv = 2), (sum = 'Keine Tür im Plan'), (ans = 'Das lässt sich nicht sagen – im Plan ist keine Tür.');
+    else if (a && !a.doorOk) (lv = 2), (sum = 'Tür nicht befahrbar'), (ans = 'Nein – direkt hinter der Tür ist es zu eng.');
+    else if (a) {
+      sum = `${a.tablesNow} ${a.tablesNow === 1 ? 'Tisch' : 'Tische'} mit Rollstuhlplatz${a.complete && a.tablesLater ? ` (+${a.tablesLater} nach Stuhl wegstellen)` : ''}${a.turnPossible ? '' : ' · kein Wenden'}`;
+      lv = !a.turnPossible || (!a.tablesNow && !a.tablesLater) ? 2 : a.tablesNow ? 0 : 1;
+      if (a.tablesNow) ans = `Ja – an ${plural(a.tablesNow, 'Tisch', 'Tischen')} ist ein Rollstuhlplatz von der Tür aus erreichbar.`;
+      else if (a.tablesLater) ans = 'Fast – erst muss ein Stuhl weggestellt werden.';
+      else ans = a.complete ? 'Nein – kein Tisch ist mit dem Rollstuhl erreichbar.' : 'Wird geprüft …';
+      if (!a.turnPossible) ans += ' Zum Wenden ist nirgends genug Platz.';
+    }
+    out.access = { lv, sum, ans };
+    const sg = app.getSight();
+    if (!sg.seats.length) out.sight = { lv: -1, sum: 'Keine Sitzplätze im Plan', ans: 'Es gibt noch keine Sitzplätze.' };
+    else if (!sg.surfaces.length) out.sight = { lv: 2, sum: 'Keine Präsentationsfläche im Plan', ans: 'Im Plan ist keine Tafel, kein Bildschirm und keine Beamer-Fläche.' };
+    else
+      out.sight = {
+        lv: sg.back ? 2 : sg.limited ? 1 : 0,
+        sum: `${sg.good} direkt · ${sg.limited} eingeschränkt · ${sg.back} ohne Blick`,
+        ans: sg.back ? `Nicht alle – ${plural(sg.back, 'Platz hat', 'Plätze haben')} keinen Blick auf Tafel oder Bildschirm.` : sg.limited ? `Ja – ${sg.limited} von ${sg.seats.length} müssen dafür aber den Kopf drehen oder an jemandem vorbeischauen.` : 'Ja – alle sehen direkt nach vorn.',
+      };
+    const t = app.getTeacher();
+    if (!t.seats.length) out.teacher = { lv: -1, sum: 'Keine Sitzplätze im Plan', ans: 'Es gibt noch keine Sitzplätze.' };
+    else {
+      const miss = t.seats.length - t.reachable;
+      out.teacher = {
+        lv: miss || t.hidden ? 2 : t.back || t.tight || t.across ? 1 : 0,
+        sum: `${t.reachable}/${t.seats.length} erreichbar · ${t.face} Gesichter im Blick`,
+        ans: miss ? `Nicht überall – ${plural(miss, 'Platz ist', 'Plätze sind')} nicht erreichbar.` : t.back ? `Ja – aber ${plural(t.back, 'Person sitzt', 'Personen sitzen')} mit dem Rücken zu Ihnen.` : t.tight || t.across ? `Ja – zu ${t.tight + t.across} Plätzen allerdings nur durch Engstellen oder über den Tisch.` : 'Ja – zu allen Plätzen, und Sie sehen die Gesichter.',
+      };
+    }
+    const c = app.getCalm();
+    if (!c.seats.length) out.calm = { lv: -1, sum: 'Keine Sitzplätze im Plan', ans: 'Es gibt noch keine Sitzplätze.' };
+    else out.calm = { lv: c.busy ? 2 : c.calm ? 0 : 1, sum: `${c.calm} ruhig · ${c.mid} mittel · ${c.busy} unruhig`, ans: c.busy ? `${plural(c.busy, 'Platz ist', 'Plätze sind')} unruhig, ${c.calm} ruhig.` : c.calm ? `Kein unruhiger Platz – ${plural(c.calm, 'Platz ist', 'Plätze sind')} ruhig.` : 'Alle Plätze haben eine mittlere Unruhe.' };
+    return out;
+  }
+
+  /* „Was hilft?“ – kurze Hinweise und Knöpfe (Einfach-Ansicht) */
+  function helpBody(key, res) {
+    const b = (act, ic, label) => `<button class="btn outline small" data-act="${act}">${icon(ic)}${label}</button>`;
+    let tips = [];
+    let btns = '';
+    if (key === 'access') {
+      const a = app.access;
+      if (a && !a.hasDoor) btns += b('addDoor', 'i-plus', 'Tür einfügen');
+      tips = ['Zwischen Tischgruppen und Wand mindestens 90 cm frei lassen.', 'Einen Tisch antippen: Der Weg von der Tür erscheint im Plan.'];
+      btns += b('wheelchair', 'i-wheelchair', 'Test-Rollstuhl ausprobieren');
+    } else if (key === 'sight') {
+      tips = ['Stühle zur Tafel drehen oder auch Bildschirm und Beamer-Fläche nutzen.', 'Einen Platz antippen zeigt, was er sieht.'];
+      if (res.lv === 2) btns += b('mark:noSight', 'i-eye', 'Plätze ohne Blick zeigen');
+      if (res.lv >= 1) btns += b('mark:turnSight', 'i-eye', 'Plätze mit Kopfdrehung zeigen');
+    } else if (key === 'teacher') {
+      tips = ['Gänge von mindestens 50 cm zwischen den Gruppen lassen.', 'Standort ändern: eine Lehrkraft-Position einfügen und verschieben.'];
+      if (res.lv === 2) btns += b('mark:noReach', 'i-teacher', 'Nicht erreichbare Plätze zeigen');
+      btns += b('addTeacher', 'i-plus', 'Lehrkraft-Position einfügen');
+    } else if (key === 'calm') {
+      tips = ['Ruhige Plätze liegen weg von Tür und Lounge.', 'Regale oder Trennwände dazwischen dämpfen; eine Zone „Ruhezone“ zählt als ruhig.'];
+      if (res.lv === 2) btns += b('mark:busy', 'i-leaf', 'Unruhige Plätze zeigen');
+      btns += b('addQuiet', 'i-plus', 'Ruhezone einzeichnen');
+    }
+    return `<p class="answer">${esc(res.ans)}</p><div class="sub-title">Was hilft?</div><ul class="help-tips">${tips.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${btns ? `<div class="btn-row">${btns}</div>` : ''}`;
   }
 
   function renderChecks() {
@@ -786,42 +1119,36 @@
       updateChecksBadge();
       return;
     }
-    const S = app.doc.settings;
-    let h = `<p class="checks-intro">Eine Prüfung antippen zeigt sie im Plan – immer eine zur Zeit. Die Werkzeugleiste oben im Plan schaltet dieselben Ansichten.</p>`;
-    // Rollstuhl
-    const a = app.access;
-    let accSum = `Durchgang ${S.passage} cm · Wenden Ø ${S.turning} cm`;
-    let accLv = -1;
-    if (a && !a.hasDoor) (accSum = 'Keine Tür im Plan'), (accLv = 2);
-    else if (a && !a.doorOk) (accSum = 'Tür nicht befahrbar'), (accLv = 2);
-    else if (a) {
-      accSum = `${a.tablesNow} ${a.tablesNow === 1 ? 'Tisch' : 'Tische'} mit Rollstuhlplatz${a.complete && a.tablesLater ? ` (+${a.tablesLater} nach Stuhl wegstellen)` : ''}${a.turnPossible ? '' : ' · kein Wenden'}`;
-      accLv = !a.turnPossible || (!a.tablesNow && !a.tablesLater) ? 2 : a.tablesNow ? 0 : 1;
+    const pro = isPro();
+    const res = checkResults();
+    let h = '';
+    if (pro) {
+      const S = app.doc.settings;
+      const prof = LLR.custom ? LLR.custom.profileName(S) : 'Standard';
+      h += `<p class="checks-intro">Eine Prüfung antippen zeigt sie im Plan – immer eine zur Zeit. Prüfregeln: <button class="link-btn" data-act="rules">${esc(prof)}</button></p>`;
+      h += lensCard('access', 'i-wheelchair', 'Rollstuhl-Check', res.access.sum, res.access.lv, accessBody);
+      h += lensCard('sight', 'i-eye', 'Sicht auf Tafel & Bildschirme', res.sight.sum, res.sight.lv, () => sightBody(app.getSight()));
+      h += lensCard('teacher', 'i-teacher', 'Lehrkraft: Wege & Blickkontakt', res.teacher.sum, res.teacher.lv, () => teacherBody(app.getTeacher()));
+      h += lensCard('calm', 'i-leaf', 'Ruhe & Reize', res.calm.sum, res.calm.lv, () => calmBody(app.getCalm()));
+    } else {
+      const issues = ['access', 'sight', 'teacher', 'calm'].filter((k) => res[k].lv >= 1);
+      const bad = issues.filter((k) => res[k].lv === 2).length;
+      h += `<div class="check-summary ${bad ? 'bad' : issues.length ? 'warn' : 'ok'}">${icon(issues.length ? 'i-alert' : 'i-check')}<span><strong>${issues.length ? plural(issues.length, 'Frage braucht', 'Fragen brauchen') + ' Aufmerksamkeit' : 'Alles in Ordnung'}</strong><small>Eine Frage antippen zeigt die Antwort im Plan.</small></span></div>`;
+      h += lensCard('access', 'i-wheelchair', QUESTIONS.access, res.access.ans, res.access.lv, () => helpBody('access', res.access));
+      h += lensCard('sight', 'i-eye', QUESTIONS.sight, res.sight.ans, res.sight.lv, () => helpBody('sight', res.sight));
+      h += lensCard('teacher', 'i-teacher', QUESTIONS.teacher, res.teacher.ans, res.teacher.lv, () => helpBody('teacher', res.teacher));
+      h += lensCard('calm', 'i-leaf', QUESTIONS.calm, res.calm.ans, res.calm.lv, () => helpBody('calm', res.calm));
     }
-    h += lensCard('access', 'i-wheelchair', 'Rollstuhl-Check', accSum, accLv, accessBody);
-    // Sicht
-    const s = app.getSight();
-    let sightSum = `${s.good} direkt · ${s.limited} eingeschränkt · ${s.back} ohne Blick`;
-    let sightLv = s.back ? 2 : s.limited ? 1 : 0;
-    if (!s.seats.length) (sightSum = 'Keine Sitzplätze im Plan'), (sightLv = -1);
-    else if (!s.surfaces.length) (sightSum = 'Keine Präsentationsfläche im Plan'), (sightLv = 2);
-    h += lensCard('sight', 'i-eye', 'Sicht auf Tafel & Bildschirme', sightSum, sightLv, () => sightBody(s));
-    // Lehrkraft
-    const t = app.getTeacher();
-    const tLv = t.reachable < t.seats.length || t.hidden ? 2 : t.back || t.tight || t.across ? 1 : 0;
-    h += lensCard('teacher', 'i-teacher', 'Lehrkraft: Wege & Blickkontakt', t.seats.length ? `${t.reachable}/${t.seats.length} erreichbar · ${t.face} Gesichter im Blick` : 'Keine Sitzplätze im Plan', t.seats.length ? tLv : -1, () => teacherBody(t));
-    // Ruhe
-    const c = app.getCalm();
-    h += lensCard('calm', 'i-leaf', 'Ruhe & Reize', c.seats.length ? `${c.calm} ruhig · ${c.mid} mittel · ${c.busy} unruhig` : 'Keine Sitzplätze im Plan', c.seats.length ? (c.busy ? 2 : c.calm ? 0 : 1) : -1, () => calmBody(c));
     // Sitzplan & Umbau (js/ui-class.js)
-    if (LLR.classUI) h += LLR.classUI.checkCards(lensCard);
+    if (LLR.classUI) h += LLR.classUI.checkCards(lensCard, !pro);
     // Überschneidungen
     const probs = app.problems.size;
-    if (probs) h += `<div class="check-row bad">${icon('i-alert')}<span class="txt">${probs} Objekt(e) überschneiden sich oder ragen aus dem Raum<br><button class="btn outline small" data-act="showProblems">Markieren</button></span></div>`;
-    else h += `<div class="check-row ok">${icon('i-check')}<span class="txt">Keine Überschneidungen</span></div>`;
+    if (probs) h += `<div class="check-row bad">${icon('i-alert')}<span class="txt">${pro ? `${probs} Objekt(e) überschneiden sich oder ragen aus dem Raum` : `${plural(probs, 'Möbelstück steht', 'Möbelstücke stehen')} ineinander oder ragt aus dem Raum`}<br><button class="btn outline small" data-act="showProblems">Markieren</button></span></div>`;
+    else h += `<div class="check-row ok">${icon('i-check')}<span class="txt">${pro ? 'Keine Überschneidungen' : 'Nichts steht ineinander'}</span></div>`;
     rerender(box, h);
     updateChecksBadge();
   }
+  LLR.checkResults = checkResults;
 
   function updateChecksBadge() {
     const b = $('#checks-badge');
@@ -854,7 +1181,9 @@
     const gl = (g, txt) => `<div class="row">${g}<span>${txt}</span></div>`;
     if (lens === 'access') {
       const S = app.doc.settings;
-      h += `<strong>Rollstuhl</strong>` + sw('background:rgba(116,205,132,.55)', `befahrbar (≥ ${S.passage} cm)`) + sw('background:rgba(47,158,68,.75)', `Wenden möglich (Ø ${S.turning} cm)`) + sw('background:rgba(224,49,49,.55)', 'frei, aber zu eng / nicht erreichbar') + sw('background:#1F6FEB', 'Rollstuhlplatz am Tisch (gestrichelt: erst Stuhl wegstellen)', 'round') + sw('color:#1F6FEB', 'Weg von der Tür (Tisch antippen)', 'line');
+      const P = LLR.prefs.pal();
+      const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+      h += `<strong>Rollstuhl</strong>` + sw(`background:${rgba(P.free, 0.55)}`, `befahrbar (≥ ${S.passage} cm)`) + sw(`background:${rgba(P.turn, 0.75)}`, `Wenden möglich (Ø ${S.turning} cm)`) + sw(`background:${rgba(P.blocked, 0.55)}`, 'frei, aber zu eng / nicht erreichbar') + sw('background:#1F6FEB', 'Rollstuhlplatz am Tisch (gestrichelt: erst Stuhl wegstellen)', 'round') + sw('color:#1F6FEB', 'Weg von der Tür (Tisch antippen)', 'line');
     } else if (lens === 'sight') {
       h += `<strong>Sicht</strong>` + gl(glyph('good'), 'direkter Blick') + gl(glyph('side'), 'eingeschränkt: Kopf seitlich drehen') + (app.doc.settings.sightPersons !== false ? gl(glyph('person'), 'eingeschränkt: Person im Blickfeld') : '') + gl(glyph('back'), 'kein Blick: abgewandt / verdeckt') + sw('', app.selectedObjects().some(A.isSeat) ? 'Sichtkegel (rot = verdeckt, orange = Person)' : 'Sitzplatz antippen: Sichtkegel', 'cone');
     } else if (lens === 'teacher') {
@@ -887,10 +1216,22 @@
   }
 
   /* ---------- Werkzeugleiste ---------- */
+  const LENS_TITLES = {
+    access: 'Rollstuhl-Check: befahrbare Flächen und Rollstuhlplätze',
+    sight: 'Sicht auf Tafel & Bildschirme',
+    teacher: 'Lehrkraft-Check: Laufwege und Blickkontakt',
+    calm: 'Reiz- & Ruhe-Check: ruhige und unruhige Plätze',
+  };
   function syncTools() {
+    const pro = isPro();
     for (const b of $$('.tool[data-mode]')) b.setAttribute('aria-pressed', String(app.mode === b.getAttribute('data-mode') && !(app.multi && app.mode === 'select' && b.getAttribute('data-mode') === 'select')));
     $('#tool-multi').setAttribute('aria-pressed', String(app.multi));
-    for (const b of $$('.tool[data-lens]')) b.setAttribute('aria-pressed', String(!!app.overlay[b.getAttribute('data-lens')]));
+    for (const b of $$('.tool[data-lens]')) {
+      const k = b.getAttribute('data-lens');
+      b.setAttribute('aria-pressed', String(!!app.overlay[k]));
+      b.title = pro ? LENS_TITLES[k] : QUESTIONS[k];
+    }
+    for (const b of $$('.level-seg [data-level]')) b.setAttribute('aria-checked', String((b.getAttribute('data-level') === 'profi') === pro));
     syncViewPop();
     syncHint();
   }
@@ -903,7 +1244,9 @@
       hint.innerHTML = `<span>Platz für <strong>${esc(app.learnerName(app.placing))}</strong> antippen</span><button class="x" data-hint="cancel">Abbrechen</button>`;
       hint.hidden = false;
     } else if (app.mode === 'measure') {
-      hint.textContent = app.measure ? `Gemessen: ${Math.round(G.dist(app.measure.a, app.measure.b))} cm – neue Linie ziehen oder Esc` : 'Linie ziehen zum Messen · rastet an Kanten ein (Alt = frei, Umschalt = 45°)';
+      const has = app.measure && G.dist(app.measure.a, app.measure.b) >= 5;
+      if (has) hint.innerHTML = `<span>Gemessen: <strong>${Math.round(G.dist(app.measure.a, app.measure.b))} cm</strong> – neue Linie ziehen oder Esc</span><button class="x" data-hint="keep" title="Als Maßlinie im Plan behalten (Eingabetaste)">Behalten</button>`;
+      else hint.textContent = 'Linie ziehen zum Messen · rastet an Kanten ein (Alt = frei, Umschalt = 45°)';
       hint.hidden = false;
     } else if (app.multi) {
       hint.textContent = 'Mehrfachauswahl: Objekte antippen oder Rahmen aufziehen · ins Leere tippen hebt die Auswahl auf';
@@ -926,10 +1269,12 @@
     const btn = $('#tool-view');
     pop.hidden = show === undefined ? !pop.hidden : !show;
     if (!pop.hidden) {
+      const z = LLR.prefs.zoom();
       const st = $('#stage').getBoundingClientRect();
       const br = btn.getBoundingClientRect();
-      pop.style.top = Math.round(br.bottom - st.top + 8) + 'px';
-      pop.style.left = Math.round(Math.max(8, Math.min(br.left - st.left, st.width - pop.offsetWidth - 8))) + 'px';
+      const pw = pop.getBoundingClientRect().width;
+      pop.style.top = Math.round((br.bottom - st.top + 8) / z) + 'px';
+      pop.style.left = Math.round(Math.max(8, Math.min(br.left - st.left, st.width - pw - 8)) / z) + 'px';
     }
     syncViewPop();
   }
@@ -965,11 +1310,11 @@
     menu.hidden = show === undefined ? !menu.hidden : !show;
     btn.setAttribute('aria-expanded', String(!menu.hidden));
     if (!menu.hidden) {
-      const multi = !!app.doc.phases;
-      menu.querySelector('[data-act="printRebuild"]').hidden = !(multi && app.phaseIndex() > 0);
-      menu.querySelector('[data-act="printSeating"]').hidden = !app.learners().length;
+      const lv = menu.querySelector('[data-act="toggleLevel"]');
+      lv.setAttribute('aria-checked', String(isPro()));
+      lv.querySelector('[data-level-state]').textContent = isPro() ? 'an' : 'aus';
       const br = btn.getBoundingClientRect();
-      menu.style.right = Math.max(8, Math.round(window.innerWidth - br.right)) + 'px';
+      menu.style.right = Math.max(8, Math.round((window.innerWidth - br.right) / LLR.prefs.zoom())) + 'px';
       const first = menu.querySelector('button:not([hidden])');
       if (first) first.focus();
     }
@@ -1030,10 +1375,18 @@
     });
     document.body.addEventListener('click', (e) => {
       const b = e.target.closest('#props [data-act], #checks [data-act], #sel-bar [data-act]');
-      if (b) doAct(b.getAttribute('data-act'));
+      if (b) doAct(b.getAttribute('data-act'), b);
+    });
+    for (const b of $$('.level-seg [data-level]')) b.addEventListener('click', () => setLevel(b.getAttribute('data-level')));
+    $('.level-seg').addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      setLevel(isPro() ? 'einfach' : 'profi');
+      $(`.level-seg [data-level="${isPro() ? 'profi' : 'einfach'}"]`).focus();
     });
     $('#stage-hint').addEventListener('click', (e) => {
       if (e.target.closest('[data-hint="cancel"]')) app.emit('place', null);
+      if (e.target.closest('[data-hint="keep"]')) doAct('keepMeasure');
     });
     const name = $('#plan-name');
     name.addEventListener('change', () => {
@@ -1080,8 +1433,9 @@
       b.addEventListener('keydown', (e) => {
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
         e.preventDefault();
-        const i = tabs.indexOf(b);
-        const n = tabs[(i + (e.key === 'ArrowDown' ? 1 : tabs.length - 1)) % tabs.length];
+        const vis = tabs.filter((x) => x.offsetParent !== null);
+        const i = vis.indexOf(b);
+        const n = vis[(i + (e.key === 'ArrowDown' ? 1 : vis.length - 1)) % vis.length];
         n.focus();
         setTab(n.getAttribute('data-tab'));
       });
@@ -1223,7 +1577,10 @@
   function openDialog(opts) {
     const dlg = $('#dlg');
     $('#dlg-title').textContent = opts.title;
-    const body = $('#dlg-body');
+    // frisches Element: Ereignis-Handler des vorigen Dialogs fallen weg
+    const old = $('#dlg-body');
+    const body = old.cloneNode(false);
+    old.replaceWith(body);
     body.innerHTML = opts.body || '';
     const foot = $('#dlg-foot');
     foot.innerHTML = '';
@@ -1239,7 +1596,7 @@
       }
       foot.appendChild(btn);
     }
-    dlg.style.width = opts.wide ? 'min(720px, calc(100vw - 24px))' : '';
+    dlg.style.width = opts.wide ? 'min(720px, calc((100vw - 24px) / var(--ui-zoom)))' : '';
     dlg.returnValue = '';
     return new Promise((resolve) => {
       const onClose = () => {
@@ -1266,31 +1623,72 @@
     return v === 'ok';
   }
 
-  /* Neuer Plan */
+  /* Neuer Plan: LLR, ein anderer Raum (auch eigene Raumvorlagen) oder leer */
+  function emptyRoomObjects(room) {
+    const W = room.w;
+    const L = room.l;
+    const mk = LLR.presetHelpers.mk;
+    const out = [mk('door', W, Math.min(150, L - 80), -90, { w: 100 })];
+    const n = Math.max(1, Math.floor((L - 60) / 190));
+    for (let i = 0; i < n; i++) out.push(mk('window', 0, (L / n) * (i + 0.5), 90, { w: Math.min(170, L / n - 20) }));
+    return out;
+  }
+
   async function openNew() {
     const hasL = app.learners().length > 0;
+    const own = LLR.custom ? LLR.custom.rooms() : [];
+    const opt = (r) => `<option value="${esc(r.id)}">${esc(r.name)}${r.desc ? ' – ' + esc(r.desc) : ''}</option>`;
+    const R = app.doc.room;
     const v = await openDialog({
       title: 'Neuer Plan',
       body: `<p>Womit möchten Sie beginnen? Der aktuelle Plan wird ersetzt (Rückgängig mit <span class="kbd">Strg</span>+<span class="kbd">Z</span> möglich; vorher ggf. unter „Pläne“ speichern).</p>
-        <label class="toggle"><input type="radio" name="newkind" value="seminar1" checked> LLR wie eingerichtet (Seminarsitzordnung I)</label>
-        <label class="toggle"><input type="radio" name="newkind" value="furnished"> LLR ohne Tische & Stühle (nur feste Einrichtung)</label>
-        <label class="toggle"><input type="radio" name="newkind" value="empty"> Leerer Raum (nur Tür & Fenster)</label>
-        ${hasL ? `<label class="toggle" style="margin-top:6px"><input type="checkbox" id="new-keep-l" checked><span>Lernendenliste behalten<small>${app.learners().length} Lernende mit ihren Bedarfen (ohne Sitzplätze)</small></span></label>` : ''}`,
+        <label class="toggle"><input type="radio" name="newkind" value="seminar1" checked><span>LLR wie eingerichtet<small>Seminarsitzordnung I mit der festen Einrichtung</small></span></label>
+        <label class="toggle"><input type="radio" name="newkind" value="furnished"><span>LLR ohne Tische &amp; Stühle<small>nur die feste Einrichtung</small></span></label>
+        <label class="toggle"><input type="radio" name="newkind" value="room"><span>Anderer Raum<small><select id="new-room" aria-label="Raum wählen">${LLR.ROOMS.filter((r) => r.id !== 'llr').map(opt).join('')}${own.length ? `<optgroup label="Eigene Räume">${own.map(opt).join('')}</optgroup>` : ''}</select></small></span></label>
+        <label class="toggle"><input type="radio" name="newkind" value="empty"><span>Leerer Raum mit Tür und Fenstern<small class="inline-fields"><input type="number" id="new-w" value="${(R.w / 100).toFixed(2)}" min="2" max="30" step="0.05" aria-label="Breite (Tafelseite) in Metern"> × <input type="number" id="new-l" value="${(R.l / 100).toFixed(2)}" min="2" max="30" step="0.05" aria-label="Länge in Metern"> m</small></span></label>
+        ${hasL ? `<label class="toggle" style="margin-top:6px"><input type="checkbox" id="new-keep-l" checked><span>Lernendenliste behalten<small>${app.learners().length} Lernende mit ihren Bedarfen (ohne Sitzplätze)</small></span></label>` : ''}
+        ${isPro() ? `<p class="desc">Eigene Räume legen Sie unter „Raum &amp; Einstellungen → Raum“ an.</p>` : ''}`,
       buttons: [
         { label: 'Abbrechen', value: 'cancel' },
         { label: 'Neu anlegen', value: 'ok', cls: 'primary' },
       ],
-      onOpen: (b) => (b._kind = () => (b.querySelector('input[name=newkind]:checked') || {}).value),
+      onOpen: (b) => {
+        b._kind = () => (b.querySelector('input[name=newkind]:checked') || {}).value;
+        const pick = (val) => (b.querySelector(`input[name=newkind][value="${val}"]`).checked = true);
+        $('#new-room').addEventListener('change', () => pick('room'));
+        $('#new-room').addEventListener('focus', () => pick('room'));
+        for (const id of ['#new-w', '#new-l']) $(id).addEventListener('focus', () => pick('empty'));
+      },
     });
     if (v !== 'ok') return;
     const kind = $('#dlg-body')._kind();
     const keepL = hasL && $('#new-keep-l') && $('#new-keep-l').checked;
-    const doc = app.createDoc(kind === 'seminar1' ? 'seminar1' : null);
-    doc.room = Object.assign({}, app.doc.room);
+    const doc = app.createDoc(null);
     doc.settings = Object.assign({}, app.doc.settings);
-    doc.objects = LLR.roomFurniture(doc.room);
-    if (kind === 'seminar1') doc.objects = doc.objects.concat(app.buildPreset(LLR.PRESETS[0], doc));
-    if (kind === 'empty') doc.objects = doc.objects.filter((o) => o.type === 'door' || o.type === 'window');
+    if (kind === 'seminar1' || kind === 'furnished') {
+      doc.room = Object.assign({}, app.doc.room);
+      doc.objects = LLR.roomFurniture(doc.room);
+      if (kind === 'seminar1') {
+        doc.objects = doc.objects.concat(app.buildPreset(LLR.PRESETS[0], doc));
+        doc.name = LLR.PRESETS[0].name;
+      }
+    } else if (kind === 'room') {
+      const id = $('#new-room').value;
+      const r = LLR.ROOMS.find((x) => x.id === id) || own.find((x) => x.id === id);
+      if (r) {
+        doc.room = Object.assign({}, r.room);
+        doc.objects = r.build(doc.room);
+        if (r.types) doc.types = JSON.parse(JSON.stringify(r.types));
+        doc.name = r.name;
+      }
+    } else {
+      const m = (sel, d) => {
+        const x = parseFloat(String($(sel).value).replace(',', '.'));
+        return Math.round(Math.max(2, Math.min(30, isFinite(x) ? x : d)) * 100);
+      };
+      doc.room = { w: m('#new-w', R.w / 100), l: m('#new-l', R.l / 100) };
+      doc.objects = emptyRoomObjects(doc.room);
+    }
     if (keepL) doc.learners = JSON.parse(JSON.stringify(app.learners()));
     replaceDoc(doc);
     toast('Neuer Plan angelegt');
@@ -1309,52 +1707,126 @@
     app.emit('phase');
   }
 
-  /* Einstellungen */
-  async function openSettings() {
+  /* ---------- Raum & Einstellungen ----------
+     Reiter: Raum, Bedienung, Darstellung (Barrierefreiheit), Prüfregeln und
+     Möbelmaße (Profi). Die Darstellung gilt sofort und je Browser,
+     „Abbrechen“ stellt sie wieder her. Alles andere gehört zum Plan. */
+  const SET_TABS = [
+    ['raum', 'Raum'],
+    ['bedienung', 'Bedienung'],
+    ['darstellung', 'Darstellung'],
+    ['regeln', 'Prüfregeln'],
+    ['moebel', 'Möbelmaße'],
+  ];
+
+  function rulesFields(values) {
+    const groups = [];
+    for (const r of A.RULES) if (!groups.includes(r.group)) groups.push(r.group);
+    let h = '';
+    for (const g of groups) {
+      h += `<h3>${esc(g)}</h3><div class="field-grid rules">`;
+      let bools = '';
+      for (const r of A.RULES.filter((x) => x.group === g)) {
+        if (r.type === 'bool') bools += `<label class="toggle"><input type="checkbox" data-rule="${r.key}" ${values[r.key] ? 'checked' : ''}><span>${esc(r.label)}</span></label>`;
+        else h += `<label class="field">${esc(r.label)} (${esc(r.unit)})<input type="number" data-rule="${r.key}" value="${values[r.key]}" min="${r.min}" max="${r.max}" step="${r.step}"><small class="def">Standard: ${r.def}</small></label>`;
+      }
+      h += `</div>${bools}`;
+    }
+    return h;
+  }
+
+  async function openSettings(tab) {
+    const pro = isPro();
+    const P = LLR.prefs;
+    const prefs0 = P.snapshot();
     const r = app.doc.room;
     const s = app.doc.settings;
-    const v = await openDialog({
-      title: 'Raum & Einstellungen',
-      wide: true,
-      body: `<h3>Raum</h3>
-        <div class="field-grid two">
+    tab = tab || panels.settingsTab || 'raum';
+    const tabs = SET_TABS.filter(([k]) => pro || ['raum', 'bedienung', 'darstellung'].includes(k) || k === tab);
+    if (!tabs.some(([k]) => k === tab)) tab = 'raum';
+    const panel = (k, html) => (tabs.some(([x]) => x === k) ? `<section class="spanel" id="spanel-${k}" role="tabpanel" aria-labelledby="stab-${k}" data-spanel="${k}"${k === tab ? '' : ' hidden'}>${html}</section>` : '');
+    const sw = (id, label, small, on) => `<label class="switch-row"><span class="lbl">${label}<small>${small}</small></span><input type="checkbox" class="switch" id="${id}" ${on ? 'checked' : ''}></label>`;
+    const choice = (name, val, cur, title, small) => `<label class="choice"><input type="radio" name="${name}" value="${val}" ${val === cur ? 'checked' : ''}><span><strong>${title}</strong><small>${small}</small></span></label>`;
+    const sysContrast = window.matchMedia('(prefers-contrast: more)').matches ? 'hoher Kontrast' : 'normal';
+    const sysMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const profiles = LLR.custom ? LLR.custom.allProfiles() : A.PROFILES;
+    const curProfile = s.profile && profiles.some((x) => x.id === s.profile) ? s.profile : 'custom';
+    let body = `<div class="dlg-tabs seg" role="tablist" aria-label="Bereich">${tabs.map(([k, n]) => `<button type="button" role="tab" id="stab-${k}" aria-controls="spanel-${k}" aria-selected="${k === tab}" tabindex="${k === tab ? 0 : -1}" data-stab="${k}">${n}</button>`).join('')}</div>`;
+    body += panel(
+      'raum',
+      `<div class="field-grid two">
           <label class="field">Breite – Tafelseite (m)<input type="number" id="set-w" value="${(r.w / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
           <label class="field">Länge (m)<input type="number" id="set-l" value="${(r.l / 100).toFixed(2)}" min="2" max="30" step="0.05"></label>
         </div>
         <p class="area-hint" id="set-area"></p>
-        <p class="desc">Möbel an der rechten Wand und an der Rückwand wandern beim Ändern mit (in allen Phasen). Tür, Fenster und Wandobjekte bleiben an ihrer Wand.</p>
-        <h3>Möbelmaße</h3>
-        <div class="field-grid">
+        <p class="desc">Möbel an der rechten Wand und an der Rückwand wandern beim Ändern mit (in allen Phasen). Tür, Fenster und Wandobjekte bleiben an ihrer Wand. Andere Raumformen (Nischen, Vorsprünge, Säulen) entstehen mit Wandstücken aus „Möbel → Raum &amp; Technik“.</p>
+        ${pro ? `<h3>Raumvorlagen</h3><p class="desc">Den Raum mit seiner festen Einrichtung (alles außer Tischen, Sitzplätzen, Prüfobjekten und Notizen) als Vorlage speichern – sie steht dann unter „Neuer Plan → Anderer Raum“.</p><div class="btn-row"><button type="button" class="btn outline small" data-sact="saveRoom">${icon('i-save')}Raum als Vorlage speichern …</button><button type="button" class="btn outline small" data-sact="manageRooms">${icon('i-folder')}Eigene Räume …</button></div>` : ''}`
+    );
+    body += panel(
+      'bedienung',
+      `${sw('set-snap', 'Magnetisch einrasten', 'Tischkanten, Trennwände, Wände, Stuhl zum Tisch · Alt-Taste hält das Einrasten kurz an', s.snap)}
+        ${sw('set-carry', 'Angestellte Stühle mitnehmen', 'Beim Verschieben eines Tisches wandern seine Stühle mit', s.carryChairs)}
+        ${pro ? `${sw('set-gridsnap', 'Am Raster einrasten', 'Möbel springen auf die Rasterlinien', s.gridSnap)}
+        <div class="field-grid two" style="margin-top:8px">
+          <label class="field">Rastergröße
+            <select id="set-grid">${GRID_SIZES.map((g) => `<option value="${g}" ${(s.grid || 50) === g ? 'selected' : ''}>${g} cm</option>`).join('')}</select></label>
+          <label class="field">Winkelraster beim Drehen
+            <select id="set-angle">${[5, 15, 45, 90].map((a) => `<option value="${a}" ${s.angleSnap === a ? 'selected' : ''}>${a}°</option>`).join('')}</select></label>
+        </div>` : ''}`
+    );
+    body += panel(
+      'darstellung',
+      `<p class="desc">Gilt sofort und nur in diesem Browser. „Abbrechen“ stellt die vorherigen Werte wieder her.</p>
+        <h3>Ansicht</h3><div class="choice-grid" role="radiogroup" aria-label="Ansicht">
+          ${choice('p-level', 'einfach', P.get('level'), 'Einfach', 'Die wichtigsten Funktionen, Prüfungen als Fragen, große Knöpfe.')}
+          ${choice('p-level', 'profi', P.get('level'), 'Profi', 'Alle Werkzeuge: Messen, Ausrichten, Zahlen, Prüfregeln, Befehlssuche.')}
+        </div>
+        <h3>Kontrast</h3><div class="choice-grid two-by" role="radiogroup" aria-label="Kontrast">
+          ${choice('p-contrast', 'auto', P.get('contrast'), 'Wie das System', `zurzeit ${sysContrast}`)}
+          ${choice('p-contrast', 'normal', P.get('contrast'), 'Normal', 'Helle Oberfläche')}
+          ${choice('p-contrast', 'high', P.get('contrast'), 'Hoher Kontrast', 'Schwarz auf Weiß, kräftige Rahmen und Marken')}
+          ${choice('p-contrast', 'dark', P.get('contrast'), 'Dunkel', 'Dunkle Oberfläche, der Plan bleibt hell')}
+        </div>
+        <h3>Schriftgröße der Bedienung</h3><div class="seg text-seg" role="radiogroup" aria-label="Schriftgröße">${P.TEXT.map((t) => `<button type="button" role="radio" data-ptext="${t}" aria-checked="${P.get('text') === t}">${t} %</button>`).join('')}</div>
+        <h3>Weitere Hilfen</h3>
+        ${sw('p-targets', 'Große Schaltflächen', 'Mindestens 44 × 44 Pixel – leichter zu treffen, z. B. am Tablet', P.get('targets') === 'large')}
+        ${sw('p-motion', 'Bewegungen reduzieren', `Kein animierter Übergang zwischen Phasen${sysMotion ? ' (am System bereits eingestellt)' : ''}`, P.get('motion') === 'reduce')}
+        ${sw('p-colors', 'Farben bei Farbsehschwäche', 'Blau, Orange und Weinrot statt Grün, Gelb und Rot – die Symbole ✓ ! ✕ bleiben', P.get('colors') === 'cvd')}
+        ${sw('p-focus', 'Deutlicher Fokusrahmen', 'Dicker schwarz-gelber Rahmen bei Bedienung mit der Tastatur', P.get('focus') === 'strong')}
+        ${sw('p-start', 'Beim Start fragen, was Sie tun möchten', 'Sonst erscheint die Startauswahl nur beim ersten Besuch (Datei → „Was möchten Sie tun?“)', !!P.get('start'))}
+        <div class="btn-row"><button type="button" class="btn outline small" data-sact="resetTips">Tipps erneut zeigen</button></div>
+        <p class="desc">Tastatur: <span class="kbd">Tab</span> wechselt zwischen den Bedienelementen, im Plan wählen <span class="kbd">N</span> / <span class="kbd">Umschalt</span>+<span class="kbd">N</span> das nächste bzw. vorige Objekt, Pfeiltasten verschieben es. Ein Bildschirmleser sagt die Auswahl an.</p>`
+    );
+    body += panel(
+      'regeln',
+      `<label class="field">Prüfprofil<select id="set-profile">${profiles.map((x) => `<option value="${esc(x.id)}" ${x.id === curProfile ? 'selected' : ''}>${esc(x.name)}${x.custom ? ' (eigenes)' : ''}</option>`).join('')}<option value="custom" ${curProfile === 'custom' ? 'selected' : ''}>Angepasst</option></select></label>
+        <p class="desc" id="set-profile-desc"></p>
+        <div id="set-rules">${rulesFields(A.currentRules(s))}</div>
+        <div class="btn-row"><button type="button" class="btn outline small" data-sact="saveProfile">${icon('i-save')}Als eigenes Profil speichern …</button><button type="button" class="btn outline small text-danger" data-sact="delProfile" hidden>${icon('i-trash')}Eigenes Profil löschen</button></div>
+        <p class="desc">Die Regeln gehören zum Plan: Sie werden mit ihm gespeichert und geteilt. DIN 18040-1: Durchgänge mind. 90 cm, Bewegungsflächen 150 × 150 cm. Alle Prüfungen sind vereinfachte Modelle.</p>`
+    );
+    body += panel(
+      'moebel',
+      `<div class="field-grid">
           <label class="field">Tisch: lange Seite (cm)<input type="number" id="set-tb" value="${s.tableBase}" min="60" max="200" step="1"></label>
           <label class="field">Tisch: Tiefe (cm)<input type="number" id="set-th" value="${s.tableHeight}" min="30" max="120" step="1"></label>
           <span></span>
           <label class="field">Stuhl: Breite (cm)<input type="number" id="set-cw" value="${s.chairW}" min="30" max="80" step="1"></label>
           <label class="field">Stuhl: Tiefe (cm)<input type="number" id="set-cd" value="${s.chairD}" min="30" max="90" step="1"></label>
         </div>
-        <h3>Barrierefreiheit & Laufwege</h3>
-        <div class="field-grid">
-          <label class="field">Rollstuhl: Durchgang (cm)<input type="number" id="set-pass" value="${s.passage}" min="60" max="200" step="5"></label>
-          <label class="field">Rollstuhl: Wendekreis Ø (cm)<input type="number" id="set-turn" value="${s.turning}" min="100" max="250" step="5"></label>
-          <label class="field">Gehen: bequemer Durchgang (cm)<input type="number" id="set-walk" value="${s.walk || 50}" min="36" max="120" step="5"></label>
-        </div>
-        <label class="toggle"><input type="checkbox" id="set-block" ${s.chairsBlock ? 'checked' : ''}> Stühle und Hocker beim Rollstuhl-Check als Hindernis zählen</label>
-        <p class="desc">DIN 18040-1: Durchgänge mind. 90 cm, Bewegungsflächen 150 × 150 cm. Beim Gehen (Lehrkraft-Check, Laufwege) gilt ab 36 cm als Engstelle, durch die man sich seitlich hindurchschiebt.</p>
-        <h3>Bedienung</h3>
-        <label class="toggle"><input type="checkbox" id="set-snap" ${s.snap ? 'checked' : ''}> Magnetisch einrasten (Tischkanten, Wände, Stühle zum Tisch) <small>Alt-Taste hält das Einrasten kurz an</small></label>
-        <label class="toggle"><input type="checkbox" id="set-carry" ${s.carryChairs ? 'checked' : ''}> Angestellte Stühle beim Verschieben von Tischen mitnehmen</label>
-        <label class="toggle"><input type="checkbox" id="set-gridsnap" ${s.gridSnap ? 'checked' : ''}> Möbel am Raster einrasten</label>
-        <div class="field-grid two">
-          <label class="field">Rastergröße
-            <select id="set-grid">${GRID_SIZES.map((g) => `<option value="${g}" ${(s.grid || 50) === g ? 'selected' : ''}>${g} cm</option>`).join('')}</select></label>
-          <label class="field">Winkelraster beim Drehen
-            <select id="set-angle">${[5, 15, 45, 90].map((a) => `<option value="${a}" ${s.angleSnap === a ? 'selected' : ''}>${a}°</option>`).join('')}</select></label>
-        </div>`,
+        <p class="desc">Gilt für alle Dreieckstische und Stühle im Plan – z. B. für kleinere Möbel in der Grundschule.</p>`
+    );
+    let curTab = tab;
+    const v = await openDialog({
+      title: 'Raum & Einstellungen',
+      wide: true,
+      body,
       buttons: [
-        { label: 'Standardwerte', onClick: () => fillDefaults() },
+        { label: 'Standardwerte', onClick: () => fillDefaults(curTab) },
         { label: 'Abbrechen', value: 'cancel' },
         { label: 'Übernehmen', value: 'ok', cls: 'primary' },
       ],
-      onOpen: () => {
+      onOpen: (b) => {
         const upd = () => {
           const w = parseFloat($('#set-w').value) || 0;
           const l = parseFloat($('#set-l').value) || 0;
@@ -1363,35 +1835,145 @@
         $('#set-w').addEventListener('input', upd);
         $('#set-l').addEventListener('input', upd);
         upd();
+        const tabsEl = $$('[data-stab]', b);
+        const show = (k, focus) => {
+          curTab = k;
+          panels.settingsTab = k;
+          savePanels();
+          for (const t of tabsEl) {
+            const on = t.getAttribute('data-stab') === k;
+            t.setAttribute('aria-selected', String(on));
+            t.tabIndex = on ? 0 : -1;
+            if (on && focus) t.focus();
+          }
+          for (const p of $$('[data-spanel]', b)) p.hidden = p.getAttribute('data-spanel') !== k;
+        };
+        for (const t of tabsEl) {
+          t.addEventListener('click', () => show(t.getAttribute('data-stab')));
+          t.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            const i = tabsEl.indexOf(t);
+            const n = tabsEl[(i + (e.key === 'ArrowRight' ? 1 : tabsEl.length - 1)) % tabsEl.length];
+            show(n.getAttribute('data-stab'), true);
+          });
+        }
+        // Darstellung: sofort anwenden
+        b.addEventListener('change', (e) => {
+          const t = e.target;
+          if (t.name === 'p-level') setLevel(t.value, { quiet: true });
+          else if (t.name === 'p-contrast') P.set('contrast', t.value);
+          else if (t.id === 'p-targets') P.set('targets', t.checked ? 'large' : 'normal');
+          else if (t.id === 'p-motion') P.set('motion', t.checked ? 'reduce' : 'auto');
+          else if (t.id === 'p-colors') P.set('colors', t.checked ? 'cvd' : 'standard');
+          else if (t.id === 'p-focus') P.set('focus', t.checked ? 'strong' : 'normal');
+          else if (t.id === 'p-start') P.set('start', t.checked);
+          else if (t.id === 'set-profile') fillProfile(t.value);
+          else if (t.hasAttribute('data-rule')) {
+            const sel = $('#set-profile');
+            if (sel && sel.value !== 'custom') {
+              sel.value = 'custom';
+              fillProfile('custom', true);
+            }
+          }
+        });
+        b.addEventListener('click', (e) => {
+          const tx = e.target.closest('[data-ptext]');
+          if (tx) {
+            P.set('text', Number(tx.getAttribute('data-ptext')));
+            for (const x of $$('[data-ptext]', b)) x.setAttribute('aria-checked', String(x === tx));
+            return;
+          }
+          const a = e.target.closest('[data-sact]');
+          if (!a) return;
+          const act = a.getAttribute('data-sact');
+          if (act === 'resetTips') {
+            P.assign({ tips: {} });
+            toast('Die Tipps erscheinen wieder an passender Stelle.');
+          } else if (LLR.custom) LLR.custom.settingsAct(act, b, { fillProfile });
+        });
+        if ($('#set-profile')) fillProfile($('#set-profile').value, true);
       },
     });
-    function fillDefaults() {
+    /* Profil in die Felder übernehmen (keepValues: nur Beschreibung) */
+    function fillProfile(id, keepValues) {
+      const prof = profiles.find((x) => x.id === id);
+      const descEl = $('#set-profile-desc');
+      const del = $('#dlg-body [data-sact="delProfile"]');
+      if (del) del.hidden = !(prof && prof.custom);
+      if (descEl) descEl.textContent = prof ? prof.desc || '' : 'Eigene Werte – vom Profil abweichend.';
+      if (!prof || keepValues) return;
+      const vals = A.profileValues(prof.values);
+      for (const i of $$('#dlg-body [data-rule]')) {
+        const k = i.getAttribute('data-rule');
+        if (i.type === 'checkbox') i.checked = !!vals[k];
+        else i.value = vals[k];
+      }
+    }
+    function fillDefaults(k) {
       const d = LLR.DEFAULT_SETTINGS;
       const R = LLR.DEFAULT_ROOM;
-      $('#set-w').value = (R.w / 100).toFixed(2);
-      $('#set-l').value = (R.l / 100).toFixed(2);
-      $('#set-tb').value = d.tableBase;
-      $('#set-th').value = d.tableHeight;
-      $('#set-cw').value = d.chairW;
-      $('#set-cd').value = d.chairD;
-      $('#set-pass').value = d.passage;
-      $('#set-turn').value = d.turning;
-      $('#set-walk').value = d.walk;
-      $('#set-block').checked = d.chairsBlock;
-      $('#set-snap').checked = d.snap;
-      $('#set-carry').checked = d.carryChairs;
-      $('#set-gridsnap').checked = d.gridSnap;
-      $('#set-grid').value = d.grid;
-      $('#set-angle').value = d.angleSnap;
-      $('#set-w').dispatchEvent(new Event('input'));
+      const setv = (sel, val) => {
+        const i = $(sel);
+        if (!i) return;
+        if (i.type === 'checkbox') i.checked = !!val;
+        else i.value = val;
+      };
+      if (k === 'raum') {
+        setv('#set-w', (R.w / 100).toFixed(2));
+        setv('#set-l', (R.l / 100).toFixed(2));
+        $('#set-w').dispatchEvent(new Event('input'));
+      } else if (k === 'bedienung') {
+        setv('#set-snap', d.snap);
+        setv('#set-carry', d.carryChairs);
+        setv('#set-gridsnap', d.gridSnap);
+        setv('#set-grid', d.grid);
+        setv('#set-angle', d.angleSnap);
+      } else if (k === 'darstellung') {
+        P.assign({ contrast: 'auto', text: 100, targets: 'normal', motion: 'auto', colors: 'standard', focus: 'normal' });
+        for (const i of $$('#dlg-body input[name=p-contrast]')) i.checked = i.value === 'auto';
+        for (const x of $$('#dlg-body [data-ptext]')) x.setAttribute('aria-checked', String(x.getAttribute('data-ptext') === '100'));
+        for (const id of ['#p-targets', '#p-motion', '#p-colors', '#p-focus']) setv(id, false);
+      } else if (k === 'regeln') {
+        setv('#set-profile', 'standard');
+        fillProfile('standard');
+      } else if (k === 'moebel') {
+        setv('#set-tb', d.tableBase);
+        setv('#set-th', d.tableHeight);
+        setv('#set-cw', d.chairW);
+        setv('#set-cd', d.chairD);
+      }
     }
-    if (v !== 'ok') return;
+    if (v !== 'ok') {
+      P.assign(prefs0);
+      applyLevelUI();
+      return;
+    }
     const val = (id, def, min, max) => {
-      const x = parseFloat(String($(id).value).replace(',', '.'));
+      const el = $(id);
+      if (!el) return def;
+      const x = parseFloat(String(el.value).replace(',', '.'));
       return isFinite(x) ? Math.max(min, Math.min(max, x)) : def;
     };
+    const chk = (id, def) => ($(id) ? $(id).checked : def);
     const newW = Math.round(val('#set-w', r.w / 100, 2, 30) * 100);
     const newL = Math.round(val('#set-l', r.l / 100, 2, 30) * 100);
+    // Prüfregeln lesen
+    let rules = null;
+    let profileId = null;
+    if ($('#set-profile')) {
+      rules = {};
+      for (const i of $$('#dlg-body [data-rule]')) {
+        const k = i.getAttribute('data-rule');
+        const rr = A.RULE[k];
+        if (i.type === 'checkbox') rules[k] = i.checked;
+        else {
+          const x = parseFloat(String(i.value).replace(',', '.'));
+          rules[k] = isFinite(x) ? Math.max(rr.min, Math.min(rr.max, x)) : rr.def;
+        }
+      }
+      profileId = $('#set-profile').value === 'custom' ? null : $('#set-profile').value;
+    }
     app.mutate((doc) => {
       if (newW !== doc.room.w || newL !== doc.room.l) app.applyRoomResize(app.roomSnapshot(), { l: 0, t: 0, r: newW - doc.room.w, b: newL - doc.room.l });
       const st = doc.settings;
@@ -1399,15 +1981,12 @@
       st.tableHeight = val('#set-th', st.tableHeight, 30, 120);
       st.chairW = val('#set-cw', st.chairW, 30, 80);
       st.chairD = val('#set-cd', st.chairD, 30, 90);
-      st.passage = val('#set-pass', st.passage, 60, 200);
-      st.turning = val('#set-turn', st.turning, 100, 250);
-      st.walk = val('#set-walk', st.walk || 50, 36, 120);
-      st.chairsBlock = $('#set-block').checked;
-      st.snap = $('#set-snap').checked;
-      st.carryChairs = $('#set-carry').checked;
-      st.gridSnap = $('#set-gridsnap').checked;
-      st.grid = parseInt($('#set-grid').value, 10) || 50;
-      st.angleSnap = parseInt($('#set-angle').value, 10) || 15;
+      st.snap = chk('#set-snap', st.snap);
+      st.carryChairs = chk('#set-carry', st.carryChairs);
+      st.gridSnap = chk('#set-gridsnap', st.gridSnap);
+      st.grid = $('#set-grid') ? parseInt($('#set-grid').value, 10) || 50 : st.grid;
+      st.angleSnap = $('#set-angle') ? parseInt($('#set-angle').value, 10) || 15 : st.angleSnap;
+      if (rules) A.applyRules(st, rules, profileId);
     });
     app.renderRoom();
     app.fitView();
@@ -1725,74 +2304,184 @@
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   }
 
-  function printHead(title) {
+  function printHead(title, sub) {
     const ph = app.doc.phases ? ` · Phase ${app.phaseIndex() + 1}: ${esc(app.phases()[app.phaseIndex()].name)}` : '';
-    return `<h1>${esc(title)}</h1><div class="sub">Lehr-Lern-Raum Inklusion (LLR) · ${app.fmtM(app.doc.room.w)} × ${app.fmtM(app.doc.room.l)} (${app.fmtArea(app.doc.room.w * app.doc.room.l)})${ph} · ${new Date().toLocaleString('de-DE')}</div>`;
+    return `<h1>${esc(title)}</h1><div class="sub">${sub !== undefined ? sub : `Lehr-Lern-Raum Inklusion (LLR) · ${app.fmtM(app.doc.room.w)} × ${app.fmtM(app.doc.room.l)} (${app.fmtArea(app.doc.room.w * app.doc.room.l)})${ph} · ${new Date().toLocaleString('de-DE')}`}</div>`;
   }
 
-  function buildPrintSheet(kind) {
-    kind = kind || 'plan';
-    let h = '';
-    if (kind === 'rebuild') {
-      const rb = app.rebuildFromPrev();
-      if (!rb) return buildPrintSheet('plan');
-      const prev = app.phases()[app.phaseIndex() - 1].name;
-      const cur = app.phases()[app.phaseIndex()].name;
-      const { svg } = withLens('rebuild', () => buildExportSVG(1, { noTitle: true, prefix: 'pr-' }));
-      h += printHead(`Umbauplan: ${prev} → ${cur}`);
-      h += `<div class="plan">${svg}</div>`;
-      const steps = LLR.rebuildSteps(rb);
-      const chairs = rb.moved.filter((m) => m.type === 'chair' || m.type === 'stool');
-      h += `<div class="cols"><div><h2>Reihenfolge</h2><ol>${steps.map((s) => `<li>${esc(s.text)}</li>`).join('')}${chairs.length ? `<li>Danach ${chairs.length} Stühle/Hocker an die Tische stellen (zarte Pfeile im Plan).</li>` : ''}</ol>${!steps.length && !chairs.length ? '<p>Keine Möbel zu bewegen.</p>' : ''}</div>`;
-      h += `<div><h2>Aufwand</h2><table><tr><td>Tische</td><td>${rb.tables}</td></tr><tr><td>Stühle und Hocker</td><td>${rb.seats}</td></tr><tr><td>Weitere Möbel</td><td>${rb.other}</td></tr><tr><td>Wege zusammen</td><td>${m1(rb.distSum)}</td></tr><tr><td>Zeit (grobe Schätzung)</td><td>allein ca. ${Math.max(1, Math.round(rb.sec / 60))} min · zu viert ca. ${Math.max(1, Math.round(rb.sec / 4 / 60 + 0.5))} min</td></tr></table>`;
-      if (rb.added.length || rb.removed.length) h += `<p style="font-size:9.5pt">${rb.added.length ? `Neu hinstellen: ${rb.added.length} (grünes +). ` : ''}${rb.removed.length ? `Wegräumen: ${rb.removed.length} (rotes ×).` : ''}</p>`;
-      h += `</div></div><div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Lila gestrichelt: Position in der vorigen Phase.</div>`;
-    } else if (kind === 'seating') {
-      const { svg } = withLens(undefined, () => buildExportSVG(1, { noTitle: true, prefix: 'pr-' }));
-      h += printHead(`Sitzplan: ${app.doc.name}`);
-      h += `<div class="plan">${svg}</div>`;
-      h += LLR.classUI ? LLR.classUI.printTable() : '';
-      h += `<div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Vertraulich – enthält Angaben zu Lernenden.</div>`;
-    } else {
-      const st = app.stats();
-      const c = st.count;
-      const { svg } = buildExportSVG(1, { noTitle: true, prefix: 'pr-' });
-      h += printHead(app.doc.name);
-      h += `<div class="plan">${svg}</div>`;
-      h += `<div class="cols"><table><tr><th colspan="2">Belegung</th></tr>
+  /* Andere Phase kurz zeichnen (für den Druck), ohne Verlauf und Speichern */
+  function withPhase(i, fn) {
+    const cur = app.phaseIndex();
+    if (!app.doc.phases || i === cur) return fn();
+    const ph = app.doc.phases;
+    const saved = app.doc.objects;
+    const access = app.access;
+    ph[cur].objects = saved;
+    app.doc.objects = ph[i].objects || [];
+    ph[i].objects = null;
+    app.doc.phase = i;
+    app.renderObjects();
+    app.problems = A.problems(app.doc);
+    app.access = A.access(app.doc, { image: true });
+    try {
+      return fn();
+    } finally {
+      ph[i].objects = app.doc.objects;
+      app.doc.objects = saved;
+      ph[cur].objects = null;
+      app.doc.phase = cur;
+      app.access = access;
+      app.renderObjects();
+      app.problems = A.problems(app.doc);
+      app.renderAnalysisLayer();
+      app.renderOverlay();
+    }
+  }
+
+  /* Namen auf den Plätzen größer zeichnen (Aushang) */
+  function withLabelScale(k, fn) {
+    app.labelScale = k;
+    app.renderObjects();
+    try {
+      return fn();
+    } finally {
+      app.labelScale = 1;
+      app.renderObjects();
+    }
+  }
+
+  /* Umbau aus der Grundaufstellung (Seminarsitzordnung I) in den aktuellen Plan:
+     jedes Möbelstück kommt vom nächstgelegenen Platz desselben Typs */
+  function setupRebuild() {
+    const isArr = (o) => A.isTable(o) || o.type === 'chair' || o.type === 'stool';
+    const base = app.buildPreset(LLR.PRESETS[0], app.doc);
+    const cur = app.doc.objects.filter(isArr);
+    const pairs = [];
+    for (const a of base) for (const b of cur) if (a.type === b.type) pairs.push({ a, b, d: G.dist(a, b) });
+    pairs.sort((x, y) => x.d - y.d);
+    const ua = new Set();
+    const ub = new Set();
+    for (const { a, b } of pairs) {
+      if (ua.has(a) || ub.has(b)) continue;
+      ua.add(a);
+      ub.add(b);
+      a.id = b.id;
+    }
+    const prev = app.doc.objects.filter((o) => !isArr(o)).concat(base);
+    return A.rebuild(prev, app.doc.objects);
+  }
+
+  const printPrefix = () => 'pr' + Math.random().toString(36).slice(2, 7) + '-';
+
+  function rebuildSection(rb, title) {
+    let h = printHead(title);
+    const orig = app.rebuildFromPrev;
+    app.rebuildFromPrev = () => rb;
+    let svg;
+    try {
+      svg = withLens('rebuild', () => buildExportSVG(1, { noTitle: true, prefix: printPrefix() })).svg;
+    } finally {
+      app.rebuildFromPrev = orig;
+    }
+    h += `<div class="plan">${svg}</div>`;
+    const steps = LLR.rebuildSteps(rb);
+    const chairs = rb.moved.filter((m) => m.type === 'chair' || m.type === 'stool');
+    h += `<div class="cols"><div><h2>Reihenfolge</h2><ol class="big">${steps.map((x) => `<li>${esc(x.text)}</li>`).join('')}${chairs.length ? `<li>Danach ${chairs.length} Stühle/Hocker an die Tische stellen (zarte Pfeile im Plan).</li>` : ''}</ol>${!steps.length && !chairs.length && !rb.added.length && !rb.removed.length ? '<p>Keine Möbel zu bewegen.</p>' : ''}</div>`;
+    h += `<div><h2>Aufwand</h2><table><tr><td>Tische</td><td>${rb.tables}</td></tr><tr><td>Stühle und Hocker</td><td>${rb.seats}</td></tr><tr><td>Weitere Möbel</td><td>${rb.other}</td></tr><tr><td>Wege zusammen</td><td>${m1(rb.distSum)}</td></tr><tr><td>Zeit (grobe Schätzung)</td><td>allein ca. ${Math.max(1, Math.round(rb.sec / 60))} min · zu viert ca. ${Math.max(1, Math.round(rb.sec / 4 / 60 + 0.5))} min</td></tr></table>`;
+    if (rb.added.length || rb.removed.length) h += `<p style="font-size:9.5pt">${rb.added.length ? `Neu hinstellen: ${rb.added.length} (grünes +). ` : ''}${rb.removed.length ? `Wegräumen: ${rb.removed.length} (rotes ×).` : ''}</p>`;
+    h += `</div></div><div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Lila gestrichelt: Position vorher, Nummern = Reihenfolge.</div>`;
+    return h;
+  }
+
+  /* Belegung und Prüfergebnisse als Tabellen (Unterrichtsentwurf) */
+  function checksTable() {
+    const st = app.stats();
+    const c = st.count;
+    let h = `<div class="cols"><table><tr><th colspan="2">Belegung</th></tr>
         <tr><td>Dreieckstische</td><td>${c.table || 0} / 12</td></tr>
         ${c.tableRect ? `<tr><td>Rechtecktische</td><td>${c.tableRect}</td></tr>` : ''}
         <tr><td>Stühle</td><td>${c.chair || 0} / 19</td></tr>
         <tr><td>Hocker</td><td>${c.stool || 0} / 2</td></tr>
         ${st.wheelchairs ? `<tr><td>Rollstuhlplätze</td><td>${st.wheelchairs}</td></tr>` : ''}
-        <tr><td><strong>Arbeitsplätze gesamt</strong></td><td><strong>${st.seats}</strong> (empfohlen max. 24)</td></tr>
+        <tr><td><strong>Arbeitsplätze gesamt</strong></td><td><strong>${st.seats}</strong> (empfohlen max. ${A.rule(app.doc.settings, 'maxSeats')})</td></tr>
         <tr><td>Lounge (Sofa, Sitzsäcke)</td><td>${st.lounge}</td></tr>`;
-      for (const z of app.doc.objects.filter((o) => T[o.type].kind === 'zone')) h += `<tr><td>Zone „${esc(z.label || 'Zone')}“</td><td>${LLR.zoneArea(z)}</td></tr>`;
-      h += `</table>`;
-      h += `<table><tr><th colspan="2">Prüfungen</th></tr><tr><td>Überschneidungen</td><td>${app.problems.size ? app.problems.size + ' Objekt(e)' : 'keine'}</td></tr>`;
-      const a = app.access && app.access.complete ? app.access : A.access(app.doc, { image: false });
-      if (a) {
-        h += `<tr><td>Tür mit Rollstuhl erreichbar</td><td>${a.doorOk ? 'ja' : 'nein'}</td></tr>
+    for (const z of app.doc.objects.filter((o) => T[o.type].kind === 'zone')) h += `<tr><td>Zone „${esc(z.label || 'Zone')}“</td><td>${LLR.zoneArea(z)}</td></tr>`;
+    h += `</table>`;
+    h += `<table><tr><th colspan="2">Prüfungen</th></tr><tr><td>Überschneidungen</td><td>${app.problems.size ? app.problems.size + ' Objekt(e)' : 'keine'}</td></tr>`;
+    const a = app.access && app.access.complete ? app.access : A.access(app.doc, { image: false });
+    if (a) {
+      h += `<tr><td>Tür mit Rollstuhl erreichbar</td><td>${a.doorOk ? 'ja' : 'nein'}</td></tr>
           <tr><td>Befahrbare Fläche</td><td>${num(a.sweptArea)} m²</td></tr>
           <tr><td>Wenden (Ø ${app.doc.settings.turning} cm)</td><td>${a.turnPossible ? 'möglich' : 'nicht möglich'}</td></tr>
           <tr><td>Tische mit Rollstuhlplatz</td><td>${a.tablesNow} sofort${a.tablesLater ? `, ${a.tablesLater} nach Wegstellen ${a.laterMove > 1 ? 'von 1–2 Stühlen' : 'eines Stuhls'}` : ''}</td></tr>`;
-      }
-      const sg = app.getSight();
-      if (sg.seats.length && sg.surfaces.length) h += `<tr><td>Sicht auf Tafel & Bildschirme</td><td>${sg.good} direkt, ${sg.limited} eingeschränkt, ${sg.back} ohne Blick</td></tr>`;
-      const t = app.getTeacher();
-      if (t.seats.length) h += `<tr><td>Lehrkraft: erreichbar / Gesicht im Blick</td><td>${t.reachable} / ${t.face} von ${t.seats.length}</td></tr>`;
-      const cm = app.getCalm();
-      if (cm.seats.length) h += `<tr><td>Ruhe & Reize</td><td>${cm.calm} ruhig, ${cm.mid} mittel, ${cm.busy} unruhig</td></tr>`;
-      h += `</table></div><div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Prüfungen sind vereinfachte Modelle (Rollstuhl: Durchgang ${app.doc.settings.passage} cm, Wendekreis ${app.doc.settings.turning} cm) – sie ersetzen keine Prüfung vor Ort.</div>`;
+    }
+    const sg = app.getSight();
+    if (sg.seats.length && sg.surfaces.length) h += `<tr><td>Sicht auf Tafel & Bildschirme</td><td>${sg.good} direkt, ${sg.limited} eingeschränkt, ${sg.back} ohne Blick</td></tr>`;
+    const t = app.getTeacher();
+    if (t.seats.length) h += `<tr><td>Lehrkraft: erreichbar / Gesicht im Blick</td><td>${t.reachable} / ${t.face} von ${t.seats.length}</td></tr>`;
+    const cm = app.getCalm();
+    if (cm.seats.length) h += `<tr><td>Ruhe & Reize</td><td>${cm.calm} ruhig, ${cm.mid} mittel, ${cm.busy} unruhig</td></tr>`;
+    h += `</table></div>`;
+    return h;
+  }
+
+  /* Druckblatt je Zielgruppe:
+     plan     – Unterrichtsentwurf: Plan, Belegung, Prüfungen (opts.phases = 'all', opts.lens, opts.checks, opts.note)
+     class    – Aushang für die Klasse: Plan mit großen Namen, ohne Bedarfe
+     seating  – Sitzplan für die Lehrkraft mit Bedarfen (vertraulich)
+     rebuild  – Umbaukarte von der vorigen Phase (opts.all = alle Übergänge)
+     setup    – Aufbaukarte aus der Grundaufstellung (Plan ohne Phasen) */
+  function buildPrintSheet(kind, opts) {
+    kind = kind || 'plan';
+    opts = opts || {};
+    let h = '';
+    if (kind === 'rebuild') {
+      if (!app.doc.phases) return buildPrintSheet('setup', opts);
+      const n = app.doc.phases.length;
+      const list = opts.all ? [...Array(n).keys()].slice(1) : [Math.max(1, app.phaseIndex())];
+      list.forEach((i, k) => {
+        h += `<div class="${k ? 'page-break' : ''}">`;
+        h += withPhase(i, () => rebuildSection(app.rebuildFromPrev(), `Umbauplan: ${app.phases()[i - 1].name} → ${app.phases()[i].name}`));
+        h += `</div>`;
+      });
+    } else if (kind === 'setup') {
+      h += rebuildSection(setupRebuild(), `Aufbau: Grundaufstellung → ${app.doc.name}`);
+    } else if (kind === 'class') {
+      const { svg } = withLens(null, () => withLabelScale(1.7, () => buildExportSVG(1, { noTitle: true, prefix: printPrefix() })));
+      h += printHead(`Sitzplan: ${app.doc.name}`, `${new Date().toLocaleDateString('de-DE')} · Tafel oben`);
+      h += `<div class="plan big">${svg}</div>`;
+      const placed = app.learners().filter((l) => app.seatOf(l.id)).map((l) => l.name).sort((x, y) => x.localeCompare(y, 'de'));
+      if (placed.length) h += `<p class="names">${placed.map(esc).join(' · ')}</p>`;
+    } else if (kind === 'seating') {
+      const { svg } = withLens(undefined, () => buildExportSVG(1, { noTitle: true, prefix: printPrefix() }));
+      h += printHead(`Sitzplan: ${app.doc.name}`);
+      h += `<div class="plan">${svg}</div>`;
+      h += LLR.classUI ? LLR.classUI.printTable() : '';
+      h += `<div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Vertraulich – enthält Angaben zu Lernenden.</div>`;
+    } else {
+      const phases = opts.phases === 'all' && app.doc.phases ? [...Array(app.doc.phases.length).keys()] : [app.phaseIndex()];
+      phases.forEach((i, k) => {
+        h += `<div class="${k ? 'page-break' : ''}">`;
+        h += withPhase(i, () => {
+          let x = printHead(app.doc.phases ? `${app.doc.name} – Phase ${i + 1}: ${app.phases()[i].name}` : app.doc.name);
+          const { svg } = withLens(opts.lens, () => buildExportSVG(1, { noTitle: true, prefix: printPrefix() }));
+          x += `<div class="plan">${svg}</div>`;
+          if (opts.checks !== false) x += checksTable();
+          return x;
+        });
+        h += `</div>`;
+      });
+      if (opts.note) h += `<p class="note">${esc(opts.note)}</p>`;
+      h += `<div class="foot">Erstellt mit dem LLR-Raumplaner 2D. Prüfungen sind vereinfachte Modelle (Rollstuhl: Durchgang ${app.doc.settings.passage} cm, Wendekreis ${app.doc.settings.turning} cm${app.doc.settings.profile ? `, Profil „${esc(LLR.custom ? LLR.custom.profileName(app.doc.settings) : app.doc.settings.profile)}“` : ''}) – sie ersetzen keine Prüfung vor Ort.</div>`;
     }
     $('#print-sheet').innerHTML = h;
   }
 
   /* Druck über das Menü: gewählte Fassung; Strg+P ohne Menü: normaler Plan */
   let printPending = null;
-  function printPlan(kind) {
+  function printPlan(kind, opts) {
     printPending = kind || 'plan';
-    buildPrintSheet(printPending);
+    buildPrintSheet(printPending, opts);
     setTimeout(() => window.print(), 50);
   }
   window.addEventListener('beforeprint', () => {
@@ -1808,54 +2497,142 @@
       title: 'So funktioniert der LLR-Raumplaner',
       wide: true,
       body: `<div class="help-grid">
-          ${card('i-box', 'Einrichten', 'Links unter „Möbel“ antippen oder in den Plan ziehen. „Anordnungen“ übernimmt eine Sitzordnung aus der Handreichung.')}
-          ${card('i-panel', 'Details', 'Ein Objekt antippen: rechts stehen Maße, Farbe und seine Prüfergebnisse. Ohne Auswahl: Raum und Belegung.')}
-          ${card('i-check', 'Prüfen', 'Rollstuhl, Sicht, Lehrkraft und Ruhe – oben im Plan oder rechts unter „Prüfen“. Es ist immer eine Prüfung im Plan zu sehen.')}
+          ${card('i-wand', 'Loslegen', '„Datei → Was möchten Sie tun?“ führt zu den häufigsten Aufgaben, der Assistent „Stunde planen“ Schritt für Schritt zur fertigen Sitzordnung.')}
+          ${card('i-sliders', 'Einfach oder Profi', 'Oben rechts umschalten: „Einfach“ zeigt das Wichtigste und stellt Prüfungen als Fragen, „Profi“ alle Werkzeuge mit Zahlen.')}
+          ${card('i-box', 'Einrichten', 'Links unter „Möbel“ fertige Bausteine oder einzelne Möbel antippen oder in den Plan ziehen. „Anordnungen“ übernimmt eine Sitzordnung.')}
+          ${card('i-more', 'Schnellaktionen', 'Unten im Plan: Drehen, Kopie, Stühle anstellen, Löschen. Rechtsklick oder lange drücken öffnet weitere Aktionen.')}
+          ${card('i-check', 'Prüfen', 'Rollstuhl, Sicht, Lehrkraft und Ruhe – oben im Plan oder rechts unter „Prüfen“, jeweils mit Hinweisen, was hilft.')}
           ${card('i-users', 'Lernende & Sitzplan', 'Namen oder Kürzel eintragen, Bedarfe markieren und auf Plätze setzen – oder automatisch verteilen lassen.')}
           ${card('i-steps', 'Phasen', 'Mehrere Anordnungen für eine Stunde (z. B. Kreis → Gruppenarbeit). Mit Übergang, Umbauaufwand und Umbauplan.')}
-          ${card('i-link', 'Speichern & Teilen', 'Automatische Sicherung im Browser. Im Datei-Menü: Pläne, Bild, Drucken. „Teilen“ erzeugt einen Link.')}
+          ${card('i-printer', 'Drucken für …', 'Aushang für die Klasse, Sitzplan für Sie, Umbaukarte für das Umbau-Team oder Unterlagen für den Unterrichtsentwurf.')}
+          ${card('i-contrast', 'Darstellung', 'Hoher Kontrast, dunkle Oberfläche, größere Schrift und Schaltflächen, Farben bei Farbsehschwäche: Datei → Darstellung &amp; Barrierefreiheit.')}
+          ${card('i-link', 'Speichern & Teilen', 'Automatische Sicherung im Browser. Im Datei-Menü: Pläne, Drucken &amp; Exportieren. „Teilen“ erzeugt einen Link.')}
         </div>
         <details><summary>Bedienung im Plan</summary><ul>
-          <li><strong>Verschieben:</strong> Objekt antippen und ziehen. <strong>Drehen:</strong> am blauen Kreis über der Auswahl ziehen (rastet in ${S.angleSnap}°-Schritten ein, Umschalt = frei) oder mit den Knöpfen unten.</li>
+          <li><strong>Verschieben:</strong> Objekt antippen und ziehen. <strong>Drehen:</strong> am blauen Kreis über der Auswahl ziehen (rastet in ${S.angleSnap}°-Schritten ein, Umschalt = frei) oder mit „Drehen“ unten um 90°.</li>
           <li><strong>Größe ändern:</strong> an den kleinen Quadraten ziehen (Umschalt an einer Ecke = Seitenverhältnis behalten, Alt = zentimetergenau).</li>
           <li><strong>Raumgröße:</strong> ohne Auswahl an einer Wand oder an den blauen Griffen ziehen – oder rechts eintippen.</li>
           <li><strong>Tische kombinieren:</strong> Tische rasten Kante an Kante ein, angestellte Stühle wandern mit. <strong>Doppelklick</strong> auf einen Tisch wählt die ganze Gruppe.</li>
-          <li><strong>Ansicht & Einrasten:</strong> Abstände, Raummaße, Raster sowie magnetisches Einrasten und Rastergröße.</li>
-          <li><strong>Mehrere Objekte:</strong> „Mehrfach“ aktivieren und antippen bzw. Rahmen aufziehen – am Computer mit gedrückter Umschalttaste.</li>
+          <li><strong>Kontextmenü:</strong> Rechtsklick (ohne zu ziehen) oder lange drücken auf ein Objekt oder eine freie Stelle. Rechte Maustaste ziehen verschiebt die Ansicht.</li>
+          <li><strong>Profi:</strong> Mehrfachauswahl (oder Umschalt + Rahmen aufziehen), Ausrichten, Verteilen, Spiegeln, genaue Lage als Zahl, Messen mit „Behalten“ als Maßlinie.</li>
           <li><strong>Ansicht:</strong> leere Fläche ziehen = verschieben, Mausrad oder zwei Finger = zoomen.</li>
-          <li><strong>Mehr Platz:</strong> den aktiven Reiter links erneut antippen klappt die Bibliothek ein; das Symbol oben rechts blendet „Details & Prüfen“ aus.</li>
         </ul></details>
         <details><summary>Prüfungen</summary><ul>
           <li><strong>Rollstuhl:</strong> befahrbare Flächen ab der Tür (Durchgang ≥ ${S.passage} cm), Wenden (Ø ${S.turning} cm), Rollstuhlplätze an Tischen mit geprüftem Weg. Test-Rollstuhl zum Ausprobieren.</li>
           <li><strong>Sicht:</strong> je Platz, ob Tafel, Bildschirm oder Beamer-Fläche direkt, nur seitlich oder gar nicht im Blick sind – auch wenn Personen davor sitzen. Platz antippen zeigt den Sichtkegel.</li>
-          <li><strong>Lehrkraft:</strong> erreicht die Lehrkraft jeden Platz (Durchgang ≥ ${S.walk || 50} cm, Engstellen ab 36 cm) und sieht sie die Gesichter? Mit Lehrkraft-Positionen aus dem Katalog lassen sich Standorte vergleichen.</li>
-          <li><strong>Ruhe & Reize:</strong> Nähe zu Tür und Lounge, Laufwege anderer, Gedränge, Fensterblick und Spiegelungen. Regale und Trennwände dämpfen; Zonen namens „Ruhezone“ zählen als ruhig.</li>
-          <li><strong>Sitzplan & Bedarfe:</strong> prüft je Person die markierten Bedarfe am Platz (z. B. Hören: nah an Tafel und Lehrkraft).</li>
+          <li><strong>Lehrkraft:</strong> erreicht die Lehrkraft jeden Platz (Durchgang ≥ ${S.walk || 50} cm) und sieht sie die Gesichter?</li>
+          <li><strong>Ruhe & Reize:</strong> Nähe zu Tür und Lounge, Laufwege anderer, Gedränge, Fensterblick und Spiegelungen.</li>
+          <li><strong>Prüfregeln (Profi):</strong> alle Grenzwerte und Gewichte lassen sich einstellen und als Profil speichern, z. B. „Reizarm“ oder „Streng“.</li>
           <li>Alle Prüfungen sind vereinfachte Modelle und ersetzen keine fachliche Prüfung vor Ort.</li>
         </ul></details>
-        <details><summary>Tastatur</summary><p><span class="kbd">Pfeiltasten</span> verschieben (mit <span class="kbd">Umschalt</span> 10 cm) · <span class="kbd">R</span> drehen · <span class="kbd">Entf</span> löschen · <span class="kbd">Strg</span>+<span class="kbd">D</span> duplizieren · <span class="kbd">Strg</span>+<span class="kbd">Z</span>/<span class="kbd">Y</span> rückgängig/wiederholen · <span class="kbd">L</span> sperren · <span class="kbd">M</span> messen · <span class="kbd">+</span>/<span class="kbd">−</span>/<span class="kbd">0</span> Zoom · <span class="kbd">Esc</span> Auswahl aufheben</p></details>`,
-      buttons: [{ label: 'Los geht’s', value: 'ok', cls: 'primary' }],
+        <details><summary>Tastatur</summary><p><span class="kbd">Strg</span>+<span class="kbd">K</span> Befehlssuche · <span class="kbd">?</span> alle Tastenkürzel · <span class="kbd">N</span> / <span class="kbd">Umschalt</span>+<span class="kbd">N</span> nächstes/voriges Objekt · <span class="kbd">Pfeiltasten</span> verschieben (mit <span class="kbd">Umschalt</span> 10 cm) · <span class="kbd">R</span> drehen · <span class="kbd">9</span> um 90° drehen · <span class="kbd">Entf</span> löschen · <span class="kbd">Strg</span>+<span class="kbd">D</span> duplizieren · <span class="kbd">Strg</span>+<span class="kbd">Z</span>/<span class="kbd">Y</span> rückgängig/wiederholen · <span class="kbd">1</span>–<span class="kbd">4</span> Prüfansichten · <span class="kbd">Umschalt</span>+<span class="kbd">F10</span> Kontextmenü · <span class="kbd">Esc</span> Auswahl aufheben</p></details>`,
+      buttons: [
+        { label: 'Was möchten Sie tun? …', onClick: () => doAct('start') },
+        { label: 'Alles klar', value: 'ok', cls: 'primary' },
+      ],
     });
   }
 
-  /* ---------- Auswahl-Leiste ---------- */
+  /* ---------- Einfach | Profi ---------- */
+  function applyLevelUI() {
+    const pro = isPro();
+    if (!pro) {
+      if (app.mode === 'measure') app.setMode('select');
+      if (app.multi) {
+        app.multi = false;
+        app.emit('mode');
+      }
+      if (panels.tab === 'objects') setTab('catalog');
+      if (!$('#view-pop').hidden) toggleViewPop(false);
+    }
+    renderCatalog();
+    renderPresets();
+    if (rightView === 'checks') renderChecks();
+    else renderProps();
+    renderSelBar();
+    renderLegend();
+    syncTools();
+    app.renderOverlay();
+    if (LLR.classUI) LLR.classUI.render();
+  }
+
+  function setLevel(level, opts) {
+    if (level !== 'einfach' && level !== 'profi') return;
+    const changed = LLR.prefs.get('level') !== level;
+    LLR.prefs.set('level', level);
+    applyLevelUI();
+    if (!changed || (opts && opts.quiet)) return;
+    if (level === 'profi') {
+      toast('Profi-Ansicht: alle Werkzeuge, Zahlen und Prüfregeln.');
+      if (LLR.assist) setTimeout(() => LLR.assist.tip('profi', 'Tipp: Strg+K öffnet die Befehlssuche, ? zeigt alle Tastenkürzel. Bei mehreren ausgewählten Objekten gibt es Ausrichten und Verteilen.'), 3600);
+    } else toast('Einfach-Ansicht: die wichtigsten Funktionen, Prüfungen als Fragen.');
+    announce(level === 'profi' ? 'Profi-Ansicht' : 'Einfach-Ansicht');
+  }
+
+  /* Darstellung geändert (Kontrast, Farben, Schriftgröße …) */
+  function onPrefs(key) {
+    if (key === 'level' || key === 'recent' || key === 'tips' || key === 'start') return;
+    if (LLR.syncSightColors) LLR.syncSightColors();
+    if (LLR.syncStatusColors) LLR.syncStatusColors();
+    app.renderRoom();
+    app.renderObjects();
+    app.scheduleAnalysis(0);
+    app.renderAnalysisLayer();
+    app.renderOverlay();
+    renderLegend();
+    if (rightView === 'checks') renderChecks();
+    else renderProps();
+    renderCatalog();
+    renderPresets();
+    if (LLR.classUI) LLR.classUI.render();
+    requestAnimationFrame(() => app.syncAspect());
+  }
+
+  /* ---------- Ansagen für Bildschirmleser ---------- */
+  let announceTimer = null;
+  function announce(msg) {
+    const el = $('#sr-live');
+    if (!el) return;
+    clearTimeout(announceTimer);
+    el.textContent = '';
+    announceTimer = setTimeout(() => (el.textContent = msg), 60);
+  }
+  function describeSelection() {
+    const objs = app.selectedObjects();
+    if (!objs.length) return 'Auswahl aufgehoben';
+    if (objs.length > 1) return `${objs.length} Objekte ausgewählt`;
+    const o = objs[0];
+    const d = T[o.type];
+    const person = o.learner ? `, ${app.learnerName(o.learner)}` : '';
+    return `${d.name}${o.label ? ' „' + o.label + '“' : ''}${person} ausgewählt. ${Math.round(o.x)} cm von links, ${Math.round(o.y)} cm von der Tafelwand${o.rot ? `, gedreht um ${Math.round(o.rot)} Grad` : ''}${o.locked ? ', gesperrt' : ''}.`;
+  }
+
+  /* ---------- Auswahl-Leiste ----------
+     Einfach: große Knöpfe mit Beschriftung (Drehen 90°, Kopie, Stühle,
+     Löschen, Mehr). Profi: kompakte Symbole mit ±15°, Ausrichten, Sperren. */
   function renderSelBar() {
     if (!app.doc) return;
     const bar = $('#sel-bar');
     const objs = app.selectedObjects();
     bar.hidden = !objs.length;
     $('#stage').classList.toggle('has-sel', objs.length > 0);
+    document.body.classList.toggle('has-sel', objs.length > 0);
     if (!objs.length) return;
+    const pro = isPro();
     const allLocked = objs.every((o) => o.locked);
     const noRot = objs.every((o) => o.locked || T[o.type].wall);
     bar.querySelector('[data-act="lock"] use').setAttribute('href', allLocked ? '#i-unlock' : '#i-lock');
-    bar.querySelector('[data-act="rotl"]').disabled = noRot;
-    bar.querySelector('[data-act="rotr"]').disabled = noRot;
+    bar.querySelector('[data-act="lock"] span').textContent = allLocked ? 'Entsperren' : 'Sperren';
+    for (const k of ['rotl', 'rotr', 'rot90']) bar.querySelector(`[data-act="${k}"]`).disabled = noRot;
     bar.querySelector('[data-act="del"]').disabled = allLocked;
     bar.querySelector('[data-act="details"]').hidden = !(mobile() || !panels.right);
+    const tables = objs.some((o) => A.isTable(o) && !o.locked);
+    bar.querySelector('[data-act="chairs"]').hidden = !tables;
     const carry = bar.querySelector('[data-act="carry"]');
-    carry.hidden = !objs.some((o) => A.isTable(o) && !o.locked);
+    carry.hidden = !tables || !pro;
     carry.setAttribute('aria-pressed', String(!!app.doc.settings.carryChairs));
+    bar.querySelector('[data-act="alignMenu"]').hidden = !pro;
+    bar.classList.toggle('labeled', !pro);
   }
 
   function syncHistory() {
@@ -1896,7 +2673,7 @@
     }
     renderCatalog();
     renderPresets();
-    setTab(panels.tab);
+    setTab(!isPro() && panels.tab === 'objects' ? 'catalog' : panels.tab);
     showRightView(panels.view === 'checks' ? 'checks' : 'props');
     renderLegend();
     syncTools();
@@ -1918,6 +2695,7 @@
       liveProps();
     });
     let lastSel = '';
+    let lastAnnounced = '';
     app.on('select', () => {
       // Kontext: mit Auswahl Details zeigen, ohne Auswahl die gewählte Ansicht
       const key = [...app.sel].sort().join(',');
@@ -1929,8 +2707,14 @@
       renderSelBar();
       if (app.overlay.sight) renderLegend();
       if (LLR.classUI) LLR.classUI.onSelect();
+      if (key !== lastAnnounced) {
+        lastAnnounced = key;
+        announce(describeSelection());
+      }
     });
     app.on('history', syncHistory);
+    app.on('announce', announce);
+    LLR.prefs.on(onPrefs);
     app.on('prefs', () => {
       syncViewPop();
       renderSelBar();
@@ -1971,14 +2755,16 @@
       renderLegend();
     });
 
+    // Beim ersten Besuch (und auf Wunsch bei jedem Start): „Was möchten Sie tun?“
+    let first = false;
     try {
-      if (!localStorage.getItem(KEY_SEEN)) {
-        localStorage.setItem(KEY_SEEN, '1');
-        if (!shared && !localStorage.getItem('llr2d.seen.v1')) openHelp();
-      }
+      first = !localStorage.getItem(KEY_SEEN) && !localStorage.getItem('llr2d.seen.v1');
+      localStorage.setItem(KEY_SEEN, '1');
     } catch (e) {
-      /* ohne Speicher keine Hilfe beim Start */
+      /* ohne Speicher keine Startauswahl */
     }
+    if (!shared && (first || LLR.prefs.get('start')) && LLR.assist) LLR.assist.openStart({ first });
+    else if (LLR.prefs.introduce) setTimeout(() => toast('Neu: Oben rechts zwischen „Einfach“ und „Profi“ umschalten – Profi zeigt alle Werkzeuge wie bisher.'), 900);
   }
 
   function bindAll() {
@@ -1998,6 +2784,26 @@
 
   LLR.ui = {
     toast,
+    doAct,
+    isPro,
+    setLevel,
+    applyLevelUI,
+    openSettings,
+    openNew,
+    openHelp,
+    openPlans,
+    buildPrintSheet,
+    addBlock,
+    choosePreset,
+    renderCatalog,
+    renderPresets,
+    showRightView,
+    replaceDoc,
+    download,
+    fileName,
+    announce,
+    showDetails,
+    toggleFileMenu,
     openDialog,
     confirmDlg,
     exportPNG,
@@ -2012,7 +2818,6 @@
     syncNeeds,
     openLibTab,
     closeDrawers,
-    showDetails,
     ensureVisible,
     mini,
     sglyph,

@@ -9,6 +9,117 @@
 
   A.def = (o) => T[o.type];
 
+  /* ---------- Prüfregeln ----------
+     Alle Grenzwerte und Gewichte der Prüfungen. Fünf davon stehen wie bisher
+     direkt in den Einstellungen (top), alle anderen in settings.rules – dort
+     nur, wenn sie vom Standard abweichen. Prüfprofile setzen mehrere Werte. */
+  A.RULES = [
+    { key: 'passage', group: 'Rollstuhl', label: 'Durchgang für Rollstühle mindestens', unit: 'cm', min: 60, max: 200, step: 5, def: 90, top: true },
+    { key: 'turning', group: 'Rollstuhl', label: 'Wendekreis (Durchmesser)', unit: 'cm', min: 100, max: 250, step: 5, def: 150, top: true },
+    { key: 'chairsBlock', group: 'Rollstuhl', label: 'Stühle und Hocker zählen als Hindernis', type: 'bool', def: true, top: true },
+    { key: 'walk', group: 'Wege & Lehrkraft', label: 'Bequemer Durchgang zum Gehen', unit: 'cm', min: 35, max: 120, step: 5, def: 50, top: true },
+    { key: 'squeeze', group: 'Wege & Lehrkraft', label: 'Engstelle (seitlich hindurchschieben) ab', unit: 'cm', min: 25, max: 60, step: 1, def: 36 },
+    { key: 'teacherWalk', group: 'Wege & Lehrkraft', label: 'Weg der Lehrkraft gilt als weit ab', unit: 'cm', min: 200, max: 2000, step: 50, def: 700 },
+    { key: 'faceAngle', group: 'Wege & Lehrkraft', label: 'Gesicht im Blick bis zu einem Winkel von', unit: '°', min: 20, max: 90, step: 5, def: 60 },
+    { key: 'profileAngle', group: 'Wege & Lehrkraft', label: 'Profil im Blick bis zu einem Winkel von', unit: '°', min: 60, max: 150, step: 5, def: 110 },
+    { key: 'sightPersons', group: 'Sicht', label: 'Sitzende Personen verdecken die Sicht', type: 'bool', def: true, top: true },
+    { key: 'sightDirect', group: 'Sicht', label: 'Direkter Blick bis zu einer Kopfdrehung von', unit: '°', min: 15, max: 70, step: 5, def: 40 },
+    { key: 'sightSide', group: 'Sicht', label: 'Mit gedrehtem Kopf sichtbar bis', unit: '°', min: 60, max: 135, step: 5, def: 95 },
+    { key: 'personLimit', group: 'Sicht', label: 'Eingeschränkt, wenn Personen mindestens so viel verdecken', unit: '%', min: 5, max: 80, step: 5, def: 25 },
+    { key: 'wDoor', group: 'Ruhe & Reize', label: 'Gewicht: Tür in der Nähe', unit: 'Punkte', min: 0, max: 60, step: 1, def: 30 },
+    { key: 'wLounge', group: 'Ruhe & Reize', label: 'Gewicht: Lounge in der Nähe', unit: 'Punkte', min: 0, max: 60, step: 1, def: 20 },
+    { key: 'wTraffic', group: 'Ruhe & Reize', label: 'Gewicht: Laufwege anderer', unit: 'Punkte', min: 0, max: 60, step: 1, def: 25 },
+    { key: 'wCrowd', group: 'Ruhe & Reize', label: 'Gewicht: viele Plätze direkt daneben', unit: 'Punkte', min: 0, max: 60, step: 1, def: 15 },
+    { key: 'wWindow', group: 'Ruhe & Reize', label: 'Gewicht: Blick aus dem Fenster', unit: 'Punkte', min: 0, max: 60, step: 1, def: 10 },
+    { key: 'wGlare', group: 'Ruhe & Reize', label: 'Gewicht: Spiegelung des Fensters', unit: 'Punkte', min: 0, max: 60, step: 1, def: 10 },
+    { key: 'wQuiet', group: 'Ruhe & Reize', label: 'Abzug: Platz in einer Ruhezone', unit: 'Punkte', min: 0, max: 60, step: 1, def: 20 },
+    { key: 'calmMax', group: 'Ruhe & Reize', label: 'Ruhiger Platz unter', unit: 'Punkte', min: 5, max: 80, step: 1, def: 25 },
+    { key: 'busyMin', group: 'Ruhe & Reize', label: 'Unruhiger Platz ab', unit: 'Punkte', min: 10, max: 100, step: 1, def: 50 },
+    { key: 'seeDist', group: 'Bedarfe & Belegung', label: 'Sehen: Präsentationsfläche höchstens', unit: 'cm', min: 100, max: 800, step: 25, def: 300 },
+    { key: 'hearDist', group: 'Bedarfe & Belegung', label: 'Hören: Tafel und Lehrkraft höchstens', unit: 'cm', min: 150, max: 1000, step: 25, def: 550 },
+    { key: 'exitDist', group: 'Bedarfe & Belegung', label: 'Ausgang: Weg zur Tür höchstens', unit: 'cm', min: 100, max: 1000, step: 25, def: 350 },
+    { key: 'maxSeats', group: 'Bedarfe & Belegung', label: 'Empfohlene Höchstzahl an Arbeitsplätzen', unit: 'Plätze', min: 1, max: 60, step: 1, def: 24 },
+  ];
+  A.RULE = Object.fromEntries(A.RULES.map((r) => [r.key, r]));
+
+  /* Wert einer Regel für einen Plan */
+  A.rule = (S, key) => {
+    const r = A.RULE[key];
+    if (!r) return undefined;
+    if (r.top) return S && S[key] !== undefined ? S[key] : r.def;
+    const v = S && S.rules ? S.rules[key] : undefined;
+    return v !== undefined ? v : r.def;
+  };
+
+  /* Nur bekannte Regeln im erlaubten Bereich (Datei, Link, Profil) */
+  A.cleanRules = (raw) => {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [k, v] of Object.entries(raw)) {
+      const r = A.RULE[k];
+      if (!r || r.top) continue;
+      if (r.type === 'bool') out[k] = !!v;
+      else {
+        const n = Number(v);
+        if (isFinite(n)) out[k] = Math.max(r.min, Math.min(r.max, n));
+      }
+    }
+    return out;
+  };
+
+  /* Prüfprofile: setzen die genannten Regeln, alle übrigen auf den Standard */
+  A.PROFILES = [
+    { id: 'standard', name: 'Standard (LLR)', desc: 'Die Werte der Handreichung und von DIN 18040-1 in vereinfachter Form.', values: {} },
+    {
+      id: 'streng',
+      name: 'Streng: mehr Bewegungsfläche',
+      desc: 'Breitere Wege für Rollstühle und Personen, Sicht und Blickkontakt enger bewertet – z. B. für Lerngruppen mit mehreren Rollstuhl- oder Rollatornutzenden.',
+      values: { passage: 120, turning: 150, walk: 60, squeeze: 45, sightDirect: 30, personLimit: 15, faceAngle: 45, teacherWalk: 500 },
+    },
+    {
+      id: 'reizarm',
+      name: 'Reizarm (z. B. Autismus-Spektrum, ADHS)',
+      desc: 'Tür, Laufwege, Fensterblick und Spiegelungen zählen stärker; ruhig gilt ein Platz erst bei weniger Punkten.',
+      values: { wDoor: 40, wLounge: 25, wTraffic: 35, wCrowd: 20, wWindow: 15, wGlare: 15, wQuiet: 25, calmMax: 20, busyMin: 40 },
+    },
+    {
+      id: 'sinne',
+      name: 'Hören & Sehen',
+      desc: 'Kürzere Entfernungen zu Tafel und Lehrkraft, Gesicht der Lehrkraft nur bei kleinem Winkel im Blick, Personen im Blickfeld schneller störend.',
+      values: { seeDist: 250, hearDist: 400, faceAngle: 45, sightDirect: 30, personLimit: 15 },
+    },
+    {
+      id: 'grundschule',
+      name: 'Grundschule',
+      desc: 'Kürzere Wege für die Lehrkraft und mehr Gewicht auf Gedränge und Laufwege.',
+      values: { teacherWalk: 500, wCrowd: 20, wTraffic: 30, seeDist: 300, exitDist: 300 },
+    },
+  ];
+
+  /* Alle Regelwerte eines Profils (fehlende = Standard) */
+  A.profileValues = (values) => {
+    const out = {};
+    for (const r of A.RULES) out[r.key] = values && values[r.key] !== undefined ? values[r.key] : r.def;
+    return out;
+  };
+
+  /* Regelwerte in die Einstellungen eines Plans schreiben */
+  A.applyRules = (S, values, profileId) => {
+    const all = A.profileValues(values);
+    const rules = {};
+    for (const r of A.RULES) {
+      if (r.top) S[r.key] = all[r.key];
+      else if (all[r.key] !== r.def) rules[r.key] = all[r.key];
+    }
+    if (Object.keys(rules).length) S.rules = rules;
+    else delete S.rules;
+    if (profileId) S.profile = profileId;
+    else delete S.profile;
+  };
+
+  /* Aktuelle Werte eines Plans (alle Regeln) */
+  A.currentRules = (S) => Object.fromEntries(A.RULES.map((r) => [r.key, A.rule(S, r.key)]));
+
   A.worldParts = (o, S) => {
     const d = T[o.type];
     if (!d) return [];
@@ -456,6 +567,7 @@
 
     /* Bild erzeugen */
     let image = null;
+    const PAL = LLR.prefs ? LLR.prefs.pal() : { turn: [47, 158, 68, 110], free: [116, 205, 132, 90], blocked: [224, 49, 49, 95] };
     if (opts.image !== false && typeof document !== 'undefined') {
       const cv = document.createElement('canvas');
       cv.width = nx;
@@ -467,9 +579,9 @@
           const k = j * NX + i;
           const p = ((j - 1) * nx + (i - 1)) * 4;
           let c = null;
-          if (turnSwept[k]) c = [47, 158, 68, 110];
-          else if (swept[k]) c = [116, 205, 132, 90];
-          else if (blocked[k]) c = [224, 49, 49, 95];
+          if (turnSwept[k]) c = PAL.turn;
+          else if (swept[k]) c = PAL.free;
+          else if (blocked[k]) c = PAL.blocked;
           if (c) {
             img.data[p] = c[0];
             img.data[p + 1] = c[1];
@@ -565,7 +677,7 @@
 
   const sightBlockers = (doc) => {
     const out = [];
-    for (const o of doc.objects) if (TALL[o.type]) out.push(...A.worldParts(o, doc.settings));
+    for (const o of doc.objects) if (TALL[o.type] || (T[o.type] && T[o.type].tall)) out.push(...A.worldParts(o, doc.settings));
     return out;
   };
 
@@ -579,13 +691,16 @@
     return Math.abs(G.normAngle(G.angle(G.sub(s.p, o)) - G.angle(face)));
   };
 
-  const sightCat = (ang) => (ang <= 40 ? 'good' : ang <= 95 ? 'side' : 'back');
+  const sightCat = (ang, ctx) => (ang <= ctx.direct ? 'good' : ang <= ctx.side ? 'side' : 'back');
 
   /* Gemeinsame Grundlage für alle Sitzplätze eines Plans */
   const sightContext = (doc) => ({
     surfaces: A.surfaces(doc),
     blockers: sightBlockers(doc),
     persons: doc.settings.sightPersons === false ? [] : doc.objects.filter(A.isSeat).map((o) => ({ id: o.id, x: o.x, y: o.y })),
+    direct: A.rule(doc.settings, 'sightDirect'),
+    side: A.rule(doc.settings, 'sightSide'),
+    personLimit: A.rule(doc.settings, 'personLimit') / 100,
   });
 
   /* Sicht eines Platzes auf eine Präsentationsfläche: Abschnitte, die frei
@@ -619,9 +734,9 @@
       else runs.push({ t0: i / SAMPLES, t1: (i + 1) / SAMPLES, st, vis: st !== 2 });
     }
     const v = { s, runs, frac: vis / SAMPLES, personFrac: shade / SAMPLES, persons: [...by], ang: viewAngle(o, s), dist: G.dist(o, s.p) };
-    v.turn = sightCat(v.ang);
+    v.turn = sightCat(v.ang, ctx);
     v.cat = v.frac < 0.5 ? 'hidden' : v.turn;
-    v.person = v.cat !== 'hidden' && v.personFrac >= A.PERSON_LIMIT;
+    v.person = v.cat !== 'hidden' && v.personFrac >= ctx.personLimit;
     return v;
   };
 
@@ -748,7 +863,7 @@
     const self = doc.objects.find((o) => o.id === id);
     if (!self) return [];
     const sd = T[self.type];
-    if (!sd || sd.wall || sd.kind === 'label' || sd.kind === 'floor' || sd.kind === 'zone') return [];
+    if (!sd || sd.wall || sd.kind === 'label' || sd.kind === 'floor' || sd.kind === 'zone' || sd.kind === 'dim') return [];
     const mine = A.worldParts(self, S);
     const sectors = [null, null, null, null];
     const consider = (d, p, q, otherId) => {
@@ -831,7 +946,7 @@
     for (let k = 0; k < N; k++) d2[k] = occ[k] ? 0 : Infinity;
     G.edt(d2, NX, NY);
     const r = (S.walk || 50) / 2;
-    const rt = Math.min(r, (S.squeeze || 36) / 2);
+    const rt = Math.min(r, A.rule(S, 'squeeze') / 2);
     // free = bequem begehbar, tight = seitlich durchquetschen (ab 36 cm)
     const free = new Uint8Array(N);
     const tight = new Uint8Array(N);
@@ -1031,7 +1146,9 @@
       return { p, seeds, field: A.walkField(grid, seeds) };
     });
     const blockers = sightBlockers(doc);
-    const LIMIT = S.teacherWalk || 700;
+    const LIMIT = A.rule(S, 'teacherWalk');
+    const FACE = A.rule(S, 'faceAngle');
+    const PROFILE = Math.max(FACE, A.rule(S, 'profileAngle'));
     const seats = [];
     for (const o of doc.objects) {
       if (!A.isSeat(o)) continue;
@@ -1051,7 +1168,7 @@
       positions.forEach((p, i) => {
         const hidden = blocked(o, p, blockers);
         const ang = turnTo(o, p);
-        const kind = hidden ? 'blocked' : ang <= 60 ? 'face' : ang <= 110 ? 'profile' : 'back';
+        const kind = hidden ? 'blocked' : ang <= FACE ? 'face' : ang <= PROFILE ? 'profile' : 'back';
         const rank = { face: 0, profile: 1, back: 2, blocked: 3 }[kind];
         const d = G.dist(o, p);
         if (!eye || rank < eye.rank || (rank === eye.rank && d < eye.d)) eye = { kind, rank, ang, d, pi: i };
@@ -1167,6 +1284,7 @@
 
   A.calm = function (doc) {
     const S = doc.settings;
+    const R = A.currentRules(S);
     const grid = A.walkGrid(doc);
     const seatsO = doc.objects.filter(A.isSeat);
     const doors = doc.objects.filter((o) => o.type === 'door');
@@ -1221,7 +1339,7 @@
         }
       });
       if (dp) {
-        const v = Math.max(0, Math.min(1, (380 - dd) / 260)) * 30 * shield(o, dp);
+        const v = Math.max(0, Math.min(1, (380 - dd) / 260)) * R.wDoor * shield(o, dp);
         add('door', 'Tür in der Nähe', v, `${(dd / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, dp);
       }
       // Lounge
@@ -1236,7 +1354,7 @@
           }
         }
       }
-      if (lp) add('lounge', 'Lounge in der Nähe', Math.max(0, Math.min(1, (300 - ld) / 220)) * 20 * shield(o, lp), `${(ld / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, lp);
+      if (lp) add('lounge', 'Lounge in der Nähe', Math.max(0, Math.min(1, (300 - ld) / 220)) * R.wLounge * shield(o, lp), `${(ld / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, lp);
       // Laufwege anderer hinter oder neben dem Platz
       const around = near(o, seatRadius(o, S) + 30);
       let passers = 0;
@@ -1245,10 +1363,10 @@
         if (pth.cells.some((c) => around.has(c))) passers++;
       }
       const share = passers / others;
-      add('traffic', 'Laufweg anderer am Platz vorbei', Math.min(1, share / 0.35) * 25, `${passers} von ${others}`);
+      add('traffic', 'Laufweg anderer am Platz vorbei', Math.min(1, share / 0.35) * R.wTraffic, `${passers} von ${others}`);
       // Gedränge: andere Plätze in Armlänge
       const crowd = seatsO.filter((x) => x !== o && G.dist(x, o) < 115).length;
-      add('crowd', 'Viele Plätze direkt daneben', Math.max(0, Math.min(1, (crowd - 2) / 3)) * 15, `${crowd} Nachbarplätze`);
+      add('crowd', 'Viele Plätze direkt daneben', Math.max(0, Math.min(1, (crowd - 2) / 3)) * R.wCrowd, `${crowd} Nachbarplätze`);
       // Blick aus dem Fenster
       let wv = null;
       for (const w of wins) {
@@ -1256,7 +1374,7 @@
         const d = G.dist(o, w.c);
         if (o.type !== 'stool' && ang <= 40 && d <= 380 && (!wv || d < wv.d)) wv = { d, at: w.c };
       }
-      if (wv) add('window', 'Blick aus dem Fenster', 10, `${(wv.d / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, wv.at);
+      if (wv) add('window', 'Blick aus dem Fenster', R.wWindow, `${(wv.d / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} m`, wv.at);
       // Spiegelungen auf Flächen, die der Platz sieht
       const glare = [];
       for (const s of surfaces) {
@@ -1265,13 +1383,13 @@
         const hits = A.glare(o, s, wins);
         if (hits.length) glare.push({ s, hits });
       }
-      if (glare.length) add('glare', 'Spiegelung des Fensters', 10, glare.map((x) => x.s.name).join(', '));
+      if (glare.length) add('glare', 'Spiegelung des Fensters', R.wGlare, glare.map((x) => x.s.name).join(', '));
       // Ruhezone
       const inQuiet = zones.some((z) => G.pointInPoly(A.worldParts(z, S)[0], o));
-      if (inQuiet) add('quiet', 'In einer Ruhezone', -20, '');
+      if (inQuiet) add('quiet', 'In einer Ruhezone', -R.wQuiet, '');
       let score = factors.reduce((a, b) => a + b.pts, 0);
       score = Math.max(0, Math.min(100, score));
-      const cat = score < 25 ? 'calm' : score < 50 ? 'mid' : 'busy';
+      const cat = score < R.calmMax ? 'calm' : score < Math.max(R.calmMax, R.busyMin) ? 'mid' : 'busy';
       seats.push({ id: o.id, x: o.x, y: o.y, score, cat, factors: factors.sort((a, b) => b.pts - a.pts), glare, doorWalk: paths.has(o.id) ? paths.get(o.id).walk : Infinity, doorDist: dd });
     }
     const res = {
@@ -1408,25 +1526,28 @@
 
   /* Bewertung eines Bedarfs an einem Platz: 0 = passt, 1 = eingeschränkt, 2 = passt nicht */
   const m1 = (cm) => (cm / 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' m';
-  A.needFit = function (key, si) {
+  A.needFit = function (key, si, S) {
     if (!si) return { st: 2, text: 'Kein Platz' };
+    const hearD = A.rule(S, 'hearDist');
+    const seeD = A.rule(S, 'seeDist');
+    const exitD = A.rule(S, 'exitDist');
     if (key === 'hear') {
       let st = 0;
       const why = [];
       if (si.sightCat === 'none' || si.sightCat === 'back') (st = 2), why.push('kein Blick auf Tafel/Bildschirm');
       else if (si.sightCat !== 'good') (st = Math.max(st, 1)), why.push('Sicht eingeschränkt');
-      if (si.sightDist > 550) (st = Math.max(st, 1)), why.push(`Tafel ${m1(si.sightDist)} entfernt`);
+      if (si.sightDist > hearD) (st = Math.max(st, 1)), why.push(`Tafel ${m1(si.sightDist)} entfernt`);
       if (si.eye === 'back' || si.eye === 'blocked') (st = Math.max(st, 2)), why.push('Lehrkraft nicht im Blick');
       else if (si.eye === 'profile') (st = Math.max(st, 1)), why.push('Lehrkraft nur seitlich im Blick');
-      if (si.teacherDist > 500) (st = Math.max(st, 1)), why.push(`Lehrkraft ${m1(si.teacherDist)} entfernt`);
+      if (si.teacherDist > hearD - 50) (st = Math.max(st, 1)), why.push(`Lehrkraft ${m1(si.teacherDist)} entfernt`);
       if (si.calmCat === 'busy') (st = Math.max(st, 1)), why.push('unruhiger Platz');
       return { st, text: st ? why.join(', ') : 'nah, gute Sicht auf Tafel und Lehrkraft' };
     }
     if (key === 'see') {
       if (si.sightCat === 'none' || si.sightCat === 'back') return { st: 2, text: 'kein Blick auf eine Präsentationsfläche' };
-      if (si.sightCat === 'good' && si.sightDist <= 300) return { st: 0, text: `direkter Blick, ${m1(si.sightDist)} entfernt` };
-      if (si.sightDist > 450) return { st: 2, text: `Präsentationsfläche ${m1(si.sightDist)} entfernt` };
-      return { st: 1, text: si.sightCat !== 'good' ? 'Sicht eingeschränkt' : `${m1(si.sightDist)} entfernt (besser ≤ 3 m)` };
+      if (si.sightCat === 'good' && si.sightDist <= seeD) return { st: 0, text: `direkter Blick, ${m1(si.sightDist)} entfernt` };
+      if (si.sightDist > seeD * 1.5) return { st: 2, text: `Präsentationsfläche ${m1(si.sightDist)} entfernt` };
+      return { st: 1, text: si.sightCat !== 'good' ? 'Sicht eingeschränkt' : `${m1(si.sightDist)} entfernt (besser ≤ ${m1(seeD)})` };
     }
     if (key === 'wheel') {
       if (si.type === 'wheelchair') return si.wheel === 0 ? { st: 0, text: 'Rollstuhlplatz, von der Tür erreichbar' } : { st: 2, text: 'Rollstuhlplatz ohne Weg von der Tür' };
@@ -1441,7 +1562,7 @@
       if (si.walk > 500 || si.eye === 'profile') return { st: 1, text: si.eye === 'profile' ? 'Lehrkraft nur seitlich im Blick' : `Weg ${m1(si.walk)}` };
       return { st: 0, text: `Weg ${m1(si.walk)}, Blickkontakt` };
     }
-    if (key === 'exit') return si.doorWalk <= 350 ? { st: 0, text: `${m1(si.doorWalk)} zur Tür` } : si.doorWalk <= 550 ? { st: 1, text: `${m1(si.doorWalk)} zur Tür` } : { st: 2, text: si.doorWalk === Infinity ? 'kein Weg zur Tür' : `${m1(si.doorWalk)} zur Tür` };
+    if (key === 'exit') return si.doorWalk <= exitD ? { st: 0, text: `${m1(si.doorWalk)} zur Tür` } : si.doorWalk <= exitD + 200 ? { st: 1, text: `${m1(si.doorWalk)} zur Tür` } : { st: 2, text: si.doorWalk === Infinity ? 'kein Weg zur Tür' : `${m1(si.doorWalk)} zur Tür` };
     return { st: 0, text: '' };
   };
 
@@ -1456,7 +1577,7 @@
       const checks = [];
       if (o) {
         const info = si.info.get(o.id);
-        for (const k of l.needs || []) checks.push(Object.assign({ need: k, label: A.NEED[k] ? A.NEED[k].label : k }, A.needFit(k, info)));
+        for (const k of l.needs || []) checks.push(Object.assign({ need: k, label: A.NEED[k] ? A.NEED[k].label : k }, A.needFit(k, info, doc.settings)));
         if (o.type === 'wheelchair' && !(l.needs || []).includes('wheel')) checks.push({ need: 'seat', label: 'Platz', st: 1, text: 'Rollstuhlplatz ohne Rollstuhlbedarf' });
         for (const id of l.with || []) {
           const other = seatOf.get(id);
@@ -1489,7 +1610,7 @@
       const info = si.info.get(s.id);
       let c = 0;
       const needs = l.needs || [];
-      for (const k of needs) c += pen[A.needFit(k, info).st];
+      for (const k of needs) c += pen[A.needFit(k, info, doc.settings).st];
       if (s.type === 'wheelchair' && !needs.includes('wheel')) c += 6;
       return c;
     };
